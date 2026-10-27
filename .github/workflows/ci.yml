@@ -60,7 +60,14 @@ jobs:
         run: cargo clippy -p keyrust-core --all-targets -- -D warnings
       # KEYRUST_SKIP_KEEPASSXC is deliberately not set: a missing KeePassXC fails the job.
       - name: Test (core, KeePassXC compatibility)
-        run: cargo test -p keyrust-core
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p keyrust-core 2>&1 | tee test-output.txt
+      - name: Report failed tests as annotations
+        if: failure()
+        shell: bash
+        run: python3 .github/scripts/annotate_test_failures.py test-output.txt
 
   app:
     name: app (${{ matrix.os }})

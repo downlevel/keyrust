@@ -39,8 +39,10 @@ Plus the Tauri system prerequisites for your OS: <https://v2.tauri.app/start/pre
 2. **WebView2**: preinstalled on Windows 10 (recent updates) and 11.
 3. **Rust** via <https://rustup.rs> (default MSVC toolchain).
 4. **Node.js** LTS, then in a terminal: `corepack enable pnpm`.
-5. **KeePassXC** from <https://keepassxc.org>. Add its install folder (e.g. `C:\Program Files\KeePassXC`)
-   to `PATH`, or set `KEEPASSXC_CLI=C:\Program Files\KeePassXC\keepassxc-cli.exe`.
+5. **KeePassXC** (not KeePass 2: the tests use KeePassXC's `keepassxc-cli` as an independent
+   reference): `winget install --id KeePassXCTeam.KeePassXC -e`. The tests find it in
+   `C:\Program Files\KeePassXC\`; for another location set `KEEPASSXC_CLI` to the full path of
+   `keepassxc-cli.exe`.
 
 ### Linux (Debian/Ubuntu)
 

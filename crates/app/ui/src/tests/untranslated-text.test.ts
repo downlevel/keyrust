@@ -1,12 +1,13 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // Heuristic check that visible text in route markup goes through m.*():
 // after removing <script>/<style> blocks, {expressions} and tags, nothing but
 // whitespace may remain. It does not inspect attributes (aria-label,
 // placeholder…) nor components outside src/routes.
-const routes = new URL("../routes", import.meta.url).pathname;
+const routes = fileURLToPath(new URL("../routes", import.meta.url));
 
 function svelteFiles(dir: string): string[] {
 	return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>

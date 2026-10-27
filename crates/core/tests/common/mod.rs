@@ -35,7 +35,15 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     })
 }
 
-/// Locates `keepassxc-cli` (`KEEPASSXC_CLI` or `PATH`).
+/// Where the official KeePassXC installers put the CLI, which they do not add
+/// to `PATH` on Windows and macOS.
+const STANDARD_LOCATIONS: &[&str] = &[
+    r"C:\Program Files\KeePassXC\keepassxc-cli.exe",
+    "/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli",
+];
+
+/// Locates `keepassxc-cli`: `KEEPASSXC_CLI` if set, otherwise `PATH`, otherwise
+/// the standard install locations.
 ///
 /// A missing CLI **fails** the test: the harness hides the output of passing
 /// tests, so a silent skip would look like a verification. Skipping is an
@@ -47,13 +55,28 @@ pub fn require_cli(test: &str) -> Option<Cli> {
         return None;
     }
     let found = match std::env::var_os("KEEPASSXC_CLI") {
-        Some(p) => Some(PathBuf::from(p)).filter(|p| p.is_file()),
-        None => find_in_path("keepassxc-cli"),
+        // An explicit path must be right: no silent fallback to another binary.
+        Some(p) => {
+            let p = PathBuf::from(p);
+            assert!(
+                p.is_file(),
+                "{test}: KEEPASSXC_CLI={} is not a file",
+                p.display()
+            );
+            Some(p)
+        }
+        None => find_in_path("keepassxc-cli").or_else(|| {
+            STANDARD_LOCATIONS
+                .iter()
+                .map(PathBuf::from)
+                .find(|p| p.is_file())
+        }),
     };
     match found {
         Some(path) => Some(Cli { path }),
         None => panic!(
-            "{test}: keepassxc-cli not found. Install KeePassXC (or set KEEPASSXC_CLI), \
+            "{test}: keepassxc-cli not found in PATH nor in {STANDARD_LOCATIONS:?}. \
+             Install KeePassXC (not KeePass 2) or set KEEPASSXC_CLI to its path, \
              or set KEYRUST_SKIP_KEEPASSXC=1 to skip the KeePassXC checks knowingly."
         ),
     }
