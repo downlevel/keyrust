@@ -1,5 +1,7 @@
 # Keyrust
 
+[![CI](https://github.com/downlevel/keyrust/actions/workflows/ci.yml/badge.svg)](https://github.com/downlevel/keyrust/actions/workflows/ci.yml)
+
 **A modern KeePass client, written in Rust.**
 
 Keyrust is an open source desktop password manager for Linux, Windows and macOS. It reads and
@@ -7,7 +9,7 @@ writes the standard **KDBX4** format, so your database stays a plain file you ow
 KeePassXC, KeePassDX (Android) or Strongbox (iOS), and sync it with Syncthing, Nextcloud or
 Dropbox. No account, no cloud, no telemetry.
 
-> **Status: pre-alpha.** The project is in Milestone 0 (setup). There is no usable vault yet;
+> **Status: pre-alpha.** The project is in Milestone 1 (infrastructure). There is no usable vault yet;
 > do not store real passwords in it.
 
 ## Planned features (v1)

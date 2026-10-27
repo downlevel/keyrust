@@ -12,7 +12,7 @@
 | Desktop shell | Tauri 2 | Binari piccoli, backend Rust nativo, modello di permessi (capabilities) per limitare l'IPC. |
 | Frontend | Svelte 5 + TypeScript + Vite | Bundle leggero, reattività con runes, poco boilerplate per un'app di questa dimensione. |
 | UI / styling | Tailwind CSS + shadcn-svelte (bits-ui) | Componenti headless accessibili, stile minimale pienamente controllabile, token CSS pronti per il dark mode. |
-| i18n | `svelte-i18n` (o `typesafe-i18n`) | Stringhe estratte da subito, inglese come lingua base. |
+| i18n | Paraglide JS 2 (inlang) | Messaggi compilati e tipizzati, tree-shaking; plugin inlang installati da npm (nessun caricamento da CDN a build time). |
 | Backend / DB / Auth | Nessuno | App locale: il "database" è il file `.kdbx` dell'utente; l'autenticazione è la master password. |
 | Distribuzione | GitHub Releases (AppImage/deb, MSI/NSIS, dmg) | Tauri bundler; release firmate, build riproducibili come obiettivo. |
 | CI/CD | GitHub Actions, matrice Linux/Windows/macOS | Build, test, clippy, fmt su tre OS; job di release su tag. |
@@ -38,6 +38,8 @@
 │ search.rs    ricerca su campi non segreti                                    │
 │ generator.rs generatore password (OsRng) + stima robustezza                  │
 │ kdf.rs       parametri Argon2id, calibrazione                                │
+│ kdbx/header.rs  lettura header KDBX4 senza crittografia (limiti KDF)          │
+│ settings.rs  impostazioni app (JSON, scrittura atomica, nessun segreto)      │
 │ error.rs     errori tipizzati (thiserror), senza segreti nei messaggi        │
 │      └── keepass-rs (KDBX4 parse/serialize) ── RustCrypto                    │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -122,12 +124,14 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
   - *Round-trip lossless*: apri fixture → salva → riapri con `keepassxc-cli` → nessuna differenza nell'export XML.
 - **Test di sicurezza**: test che verificano che `Debug`/log non contengano segreti; clippy con lint su `unwrap`
   nei percorsi critici; `cargo audit` / `cargo deny` in CI.
-- **Fuzzing**: `cargo-fuzz` con target `open_from_bytes(data, password)` su `core` (e indirettamente sul parser di keepass-rs);
-  corpus iniziale dalle fixture; run breve in CI e run lungo manuale/nightly.
+- **Fuzzing**: `cargo-fuzz` (`fuzz/`): oggi `kdbx_header_peek` su `kdbx::header::peek`; il target su `Database::parse`
+  arriva in Milestone 3 insieme ai limiti KDF (vedi `fuzz/README.md`). Corpus dalle fixture; 60 s per target in CI.
 - **Frontend**: Vitest per store e componenti; Playwright/WebDriver (tauri-driver) per uno smoke e2e su Linux.
-- **CI**: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, lint/test frontend, su Linux/Windows/macOS.
-- **Osservabilità**: crate `tracing` con log locali solo a livello di eventi (mai valori di campi, percorsi
-  sì ma configurabili); nessuna telemetria e nessun error tracking remoto.
+- **CI** (`.github/workflows/ci.yml`): job `core` e `app` su Linux/Windows/macOS (fmt, clippy, test con KeePassXC,
+  check/lint/test frontend, build Tauri debug non firmata caricata come artifact), `deny`, `fuzz`. Action fissate a SHA.
+- **Osservabilità**: `tracing` + `tracing-subscriber` su stderr (filtro `KEYRUST_LOG`, default `info`), nessun file di log.
+  Log a livello di eventi, tipi di errore e conteggi; mai valori di campi; percorsi solo a `debug`. Verificato da
+  `crates/core/tests/logging_policy.rs`. Nessuna telemetria e nessun error tracking remoto.
 
 ## Domande aperte
 - **Supporto KDBX4 in scrittura di keepass-rs**: verificare maturità del feature flag di salvataggio KDBX4 e la
@@ -135,5 +139,5 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
 - **Firma codice Windows/macOS**: acquistare certificati (Apple Developer, Authenticode) o pubblicare in V1 solo
   artefatti firmati con minisign/cosign + checksum? DA DEFINIRE.
 - **Conflitti di sync**: solo rilevamento + avviso in V1, oppure merge in stile KeePassXC? DA DEFINIRE.
-- **Libreria i18n**: `svelte-i18n` vs `typesafe-i18n`. DA DEFINIRE in fase di setup.
-- **Package manager frontend**: pnpm (proposto) vs npm.
+- ~~Libreria i18n~~: decisa in Milestone 1, Paraglide JS 2.
+- ~~Package manager frontend~~: pnpm.

@@ -6,11 +6,14 @@
 Cargo.toml              Cargo workspace (default member: crates/core)
 rust-toolchain.toml     pinned Rust toolchain (rustup installs it automatically)
 crates/core/            keyrust-core: vault / KDBX4 layer, no UI dependencies
-crates/core/tests/      KeePassXC compatibility tests (spike 0001)
+crates/core/tests/      KeePassXC compatibility and logging-policy tests
+crates/app/tests/       Tauri security configuration tests
 crates/app/             keyrust-app: Tauri 2 crate (tauri.conf.json, capabilities/, icons/)
 crates/app/ui/          SvelteKit (SPA) + Svelte 5 + TypeScript + Tailwind + shadcn-svelte
 tests/fixtures/         KeePassXC-created test databases (test data only)
 scripts/                helper scripts (fixture generation)
+fuzz/                   cargo-fuzz targets (separate workspace, nightly)
+.github/workflows/      CI
 docs/                   PRD, architecture, design, roadmap, plans, spikes
 ```
 
@@ -36,8 +39,10 @@ Plus the Tauri system prerequisites for your OS: <https://v2.tauri.app/start/pre
 2. **WebView2**: preinstalled on Windows 10 (recent updates) and 11.
 3. **Rust** via <https://rustup.rs> (default MSVC toolchain).
 4. **Node.js** LTS, then in a terminal: `corepack enable pnpm`.
-5. **KeePassXC** from <https://keepassxc.org>. Add its install folder (e.g. `C:\Program Files\KeePassXC`)
-   to `PATH`, or set `KEEPASSXC_CLI=C:\Program Files\KeePassXC\keepassxc-cli.exe`.
+5. **KeePassXC** (not KeePass 2: the tests use KeePassXC's `keepassxc-cli` as an independent
+   reference): `winget install --id KeePassXCTeam.KeePassXC -e`. The tests find it in
+   `C:\Program Files\KeePassXC\`; for another location set `KEEPASSXC_CLI` to the full path of
+   `keepassxc-cli.exe`.
 
 ### Linux (Debian/Ubuntu)
 
@@ -62,7 +67,7 @@ cargo deny check
 # Frontend
 cd crates/app/ui
 pnpm install
-pnpm check && pnpm lint && pnpm format:check && pnpm build
+pnpm check && pnpm lint && pnpm format:check && pnpm test && pnpm build
 
 # Desktop app (from crates/app/ui; the script runs the Tauri CLI from crates/app)
 pnpm tauri dev
@@ -75,19 +80,52 @@ a verification). To skip them knowingly, set `KEYRUST_SKIP_KEEPASSXC=1`
 
 Regenerate the KeePassXC fixtures (Linux/macOS/Git Bash): `scripts/gen-fixtures.sh`.
 
-## Milestone 0 verification checklist (Windows)
+### Logs
 
-The development machine used so far has no Tauri system libraries, so the desktop app has **not**
-been compiled yet. Please run, on Windows, from the repository root:
+The app logs to stderr only. `KEYRUST_LOG=debug pnpm tauri dev` shows more detail (still no
+secrets; see the logging policy in [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
-- [ ] `cargo test -p keyrust-core` → 7 tests pass
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` → no warnings (first build of the app crate)
-- [ ] `cd crates/app/ui; pnpm install; pnpm tauri dev` → a "Keyrust" window opens with the placeholder
-      unlock card (disabled password field and button) and `core v0.0.1` at the bottom
-- [ ] In the window, open DevTools (right click → Inspect, or Ctrl+Shift+I): the console shows **no
-      Content Security Policy violations**
-- [ ] `pnpm tauri build` → produces an installer under `target/release/bundle/`; install it, start it,
-      and check the console again (the production CSP is stricter than the dev one)
+### Translations
+
+UI strings live in `crates/app/ui/messages/en.json` and are compiled by Paraglide into
+`src/lib/paraglide/` (generated, not committed) by `pnpm check`, `pnpm test` and the Vite build.
+
+### Fuzzing
+
+See [fuzz/README.md](../fuzz/README.md) (needs a nightly toolchain).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push (except documentation-only changes), on pull requests
+to `main` and manually (*Actions* → *CI* → *Run workflow*):
+
+| Job | What it does |
+|---|---|
+| `core` (Linux, Windows, macOS) | installs KeePassXC; fmt (Linux), clippy and tests of `keyrust-core` |
+| `app` (Linux, Windows, macOS) | frontend check/lint/format/test/build; workspace clippy; `keyrust-app` tests (security configuration); debug build of the desktop app |
+| `deny` | `cargo deny check` (licences, advisories, sources) |
+| `fuzz` | every cargo-fuzz target for 60 s |
+
+The desktop build is the slowest step, so it runs only for pull requests, pushes to `main` and manual
+runs; a plain push to a branch stops after the tests. Those runs upload an **unsigned debug build** as
+an artifact, kept 7 days:
+`keyrust-windows-debug` (NSIS installer), `keyrust-macos-debug` (dmg), `keyrust-linux-debug` (deb).
+Download it from the run page on GitHub (*Actions* → run → *Artifacts*). They are for testing only:
+Windows SmartScreen and macOS Gatekeeper will warn because they are not signed (on macOS:
+right click → Open).
+
+## Desktop app verification checklist (Windows)
+
+The development machine has no Tauri system libraries, so the app is compiled only by CI. On Windows:
+
+- [ ] Download `keyrust-windows-debug` from the latest green CI run and run the installer
+      (SmartScreen: *More info* → *Run anyway*)
+- [ ] A "Keyrust" window opens with the placeholder unlock card (disabled password field and button)
+      and `core v0.0.1` at the bottom
+- [ ] Open DevTools (right click → Inspect, or Ctrl+Shift+I): the console shows **no Content Security
+      Policy violations**
+- [ ] Optional, from source: `cargo test -p keyrust-core` (with KeePassXC installed) and
+      `cd crates/app/ui; pnpm install; pnpm tauri dev`
 - [ ] Optional: in the KeePassXC GUI create two databases with password `keyrust-test-password`
       (Database → Database Settings → Security → Encryption settings): one with **ChaCha20 + Argon2id**,
       one with **AES-256 + Argon2d**; send them back to be added as fixtures.

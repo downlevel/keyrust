@@ -13,15 +13,16 @@
 - [x] Bozza `SECURITY.md`: threat model (cosa protegge / cosa no) e policy di segnalazione vulnerabilità
 
 ## Milestone 1 — Infrastruttura
-- [ ] GitHub Actions: matrice Linux/Windows/macOS con fmt, clippy, test Rust, lint/test frontend, `tauri build`
-- [ ] Job `cargo audit` / `cargo deny` in CI
-- [ ] Generare fixture `.kdbx` con KeePassXC (AES/ChaCha20, Argon2id/Argon2d, campi custom, allegati, cronologia, cestino) in `tests/fixtures/`
-- [ ] Installare `keepassxc-cli` nel job Linux per i test di compatibilità
-- [ ] Setup `cargo-fuzz` in `fuzz/` con un target vuoto e run breve in CI
-- [ ] Tauri: capabilities minime, CSP restrittiva, nessun accesso FS/shell dal frontend
-- [ ] `tracing` configurato con policy "nessun valore di campo nei log"
-- [ ] Infrastruttura i18n (libreria scelta, `en` come lingua base, estrazione stringhe)
-- [ ] Persistenza impostazioni app (`settings.json` nella config dir, senza segreti)
+- [x] GitHub Actions: matrice Linux/Windows/macOS con fmt, clippy, test Rust, lint/test frontend, `tauri build`
+- [x] Job `cargo deny` in CI (advisories, licenze, sorgenti; copre anche `cargo audit`)
+- [x] Generare fixture `.kdbx` con KeePassXC (campi custom, allegati, cronologia, cestino; KDBX 4.1 e 3.1) in `tests/fixtures/`
+- [ ] Fixture KeePassXC con Argon2id/Argon2d e ChaCha20: `keepassxc-cli` non permette di sceglierli, serve la GUI (task utente)
+- [x] Installare `keepassxc-cli` nei job Linux, Windows e macOS per i test di compatibilità
+- [x] Setup `cargo-fuzz` in `fuzz/` con target `kdbx_header_peek` e run breve in CI
+- [x] Tauri: capabilities minime, CSP restrittiva, nessun accesso FS/shell dal frontend
+- [x] `tracing` configurato con policy "nessun valore di campo nei log"
+- [x] Infrastruttura i18n (libreria scelta, `en` come lingua base, estrazione stringhe)
+- [x] Persistenza impostazioni app (`settings.json` nella config dir, senza segreti)
 
 ## Milestone 2 — Design (UI scaffolding)
 - [ ] Prototipare l'interfaccia in Claude Design partendo da DESIGN_PROMPT.md e validare la direzione visiva

@@ -1,0 +1,24 @@
+[package]
+name = "keyrust-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+keyrust-core = { path = "../crates/core" }
+
+# Not part of the main workspace: cargo-fuzz needs nightly and its own profile.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "kdbx_header_peek"
+path = "fuzz_targets/kdbx_header_peek.rs"
+test = false
+doc = false
+bench = false

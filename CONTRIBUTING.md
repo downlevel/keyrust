@@ -31,6 +31,20 @@ cd crates/app/ui && pnpm check && pnpm lint && pnpm format:check && pnpm build
 - Rust: edition 2024, `unsafe_code` forbidden, no `unwrap`/`expect` outside tests.
 - Frontend: Svelte 5 runes, TypeScript strict, Tailwind + shadcn-svelte components.
 - Commits: [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:` …).
-- UI strings are English and go through the i18n layer (from Milestone 1).
+- UI strings are English and go through Paraglide: add them to `crates/app/ui/messages/en.json` and
+  use `m.key()` in markup (a test rejects literal text in route markup).
+
+## Logging policy
+
+Logs use `tracing` and go to stderr only (`KEYRUST_LOG=debug` for more detail).
+
+- At `info` and above: events, error kinds and counts only.
+- **Never** log field values (passwords, titles, usernames, URLs, notes), master passwords, keys,
+  or file contents, at any level.
+- File paths only at `debug`.
+- Types holding vault data must not implement `Display`, and their `Debug` must be redacted.
+
+`crates/core/tests/logging_policy.rs` checks this for the core operations; extend it when you add
+operations that touch user data.
 
 By contributing you agree that your contributions are licensed under GPL-3.0-or-later.

@@ -68,7 +68,11 @@ Tutte motivate da come KeePassXC esporta, non da keepass-rs:
   del file (due export dello stesso file a 3 secondi di distanza differiscono). Per far emergere sempre eventuali
   altri valori dipendenti dall'ora, T2 attende 1,1 s tra i due export.
 - **Item CustomData confrontati come mappa** (ordinati per chiave): KeePassXC li esporta in ordine non deterministico.
-- **Riferimenti agli allegati (`Ref`) risolti per contenuto**: sono indici del pool interno, il cui ordine può cambiare.
+- **Allegati confrontati per contenuto, non per `Ref`**: ogni allegato è identificato da (UUID della voce, versione in
+  cronologia, nome). Il numero `Ref` non entra nel confronto: è un indice del pool il cui ordine può cambiare, e
+  KeePassXC recente (verificato su Windows/macOS, ottobre 2026) esporta `Ref="0"` per ogni allegato. Le voci correnti
+  sono lette con `keepassxc-cli attachment-export`; le versioni in cronologia (non esportabili dalla CLI) con
+  keepass-rs, e dove i `Ref` sono veri indici di pool (KeePassXC 2.7.x, CI Linux) anche contro KeePassXC.
 - Nessun'altra normalizzazione: anche `Meta/Generator` resta identico dopo il salvataggio con keepass-rs.
 
 ## Osservazioni rilevanti per l'implementazione (Milestone 3)

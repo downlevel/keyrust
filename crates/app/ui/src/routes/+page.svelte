@@ -4,6 +4,7 @@
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Input } from "$lib/components/ui/input/index.js";
 	import { Label } from "$lib/components/ui/label/index.js";
+	import { m } from "$lib/paraglide/messages.js";
 
 	type AppInfo = { version: string };
 
@@ -19,12 +20,12 @@
 	<section class="w-full max-w-sm rounded-xl border bg-card p-8 shadow-sm">
 		<header class="mb-6 flex items-center gap-3">
 			<KeyRound class="size-7 text-zinc-900" aria-hidden="true" />
-			<h1 class="text-2xl font-semibold tracking-tight">Keyrust</h1>
+			<h1 class="text-2xl font-semibold tracking-tight">{m.app_name()}</h1>
 		</header>
 
 		<form class="space-y-4" onsubmit={(e) => e.preventDefault()}>
 			<div class="space-y-2">
-				<Label for="master-password">Master password</Label>
+				<Label for="master-password">{m.unlock_master_password_label()}</Label>
 				<Input
 					id="master-password"
 					type="password"
@@ -33,14 +34,14 @@
 					disabled
 				/>
 			</div>
-			<Button type="submit" class="w-full" disabled>Unlock</Button>
+			<Button type="submit" class="w-full" disabled>{m.unlock_button()}</Button>
 		</form>
 
 		<p class="mt-6 text-sm text-muted-foreground">
-			Pre-alpha: database support coming in Milestone 3.
+			{m.prealpha_notice()}
 		</p>
 		<p class="mt-2 font-mono text-xs text-muted-foreground" data-testid="version">
-			{version ? `core v${version}` : "core version unavailable outside Tauri"}
+			{version ? m.core_version({ version }) : m.core_version_unavailable()}
 		</p>
 	</section>
 </main>
