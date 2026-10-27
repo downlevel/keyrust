@@ -1,0 +1,231 @@
+{
+	"$comment": "Single source of truth for commands: native menu (crates/app/src/menu.rs), keyboard shortcuts, the Keyboard Shortcuts panel and the command palette. Labels are Paraglide keys of messages/en.json. scope 'outsideText': only when focus is not in a text field. nativeAccelerator: the native menu item owns the shortcut. trigger 'copy': runs on the DOM copy event instead of keydown.",
+	"menus": [
+		{ "id": "file", "labelKey": "menu_file" },
+		{ "id": "edit", "labelKey": "menu_edit" },
+		{ "id": "entry", "labelKey": "menu_entry" },
+		{ "id": "group", "labelKey": "menu_group" },
+		{ "id": "tools", "labelKey": "menu_tools" },
+		{ "id": "help", "labelKey": "menu_help" }
+	],
+	"commands": [
+		{
+			"id": "new_database",
+			"menu": "file",
+			"labelKey": "cmd_new_database",
+			"shortcut": "CmdOrCtrl+Shift+N",
+			"scope": "global",
+			"nativeAccelerator": true
+		},
+		{
+			"id": "open_database",
+			"menu": "file",
+			"labelKey": "cmd_open_database",
+			"shortcut": "CmdOrCtrl+O",
+			"scope": "global",
+			"nativeAccelerator": true
+		},
+		{
+			"id": "save",
+			"menu": "file",
+			"labelKey": "cmd_save",
+			"shortcut": "CmdOrCtrl+S",
+			"scope": "global",
+			"nativeAccelerator": true,
+			"separatorBefore": true
+		},
+		{
+			"id": "lock",
+			"menu": "file",
+			"labelKey": "cmd_lock",
+			"shortcut": "CmdOrCtrl+L",
+			"scope": "global",
+			"nativeAccelerator": true
+		},
+		{
+			"id": "close_database",
+			"menu": "file",
+			"labelKey": "cmd_close_database",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false
+		},
+		{
+			"id": "quit",
+			"menu": "file",
+			"macMenu": "app",
+			"labelKey": "cmd_quit",
+			"shortcut": "CmdOrCtrl+Q",
+			"scope": "global",
+			"nativeAccelerator": true,
+			"separatorBefore": true
+		},
+
+		{
+			"id": "find",
+			"menu": "edit",
+			"labelKey": "cmd_find",
+			"shortcut": "CmdOrCtrl+F",
+			"scope": "global",
+			"nativeAccelerator": false,
+			"separatorBefore": true
+		},
+		{
+			"id": "command_palette",
+			"menu": "edit",
+			"labelKey": "cmd_command_palette",
+			"shortcut": "CmdOrCtrl+K",
+			"scope": "global",
+			"nativeAccelerator": false
+		},
+
+		{
+			"id": "new_entry",
+			"menu": "entry",
+			"labelKey": "cmd_new_entry",
+			"shortcut": "CmdOrCtrl+N",
+			"scope": "global",
+			"nativeAccelerator": true
+		},
+		{
+			"id": "edit_entry",
+			"menu": "entry",
+			"labelKey": "cmd_edit_entry",
+			"shortcut": "CmdOrCtrl+E",
+			"scope": "outsideText",
+			"nativeAccelerator": false
+		},
+		{
+			"id": "copy_username",
+			"menu": "entry",
+			"labelKey": "cmd_copy_username",
+			"shortcut": "CmdOrCtrl+B",
+			"scope": "outsideText",
+			"nativeAccelerator": false,
+			"separatorBefore": true
+		},
+		{
+			"id": "copy_password",
+			"menu": "entry",
+			"labelKey": "cmd_copy_password",
+			"shortcut": "CmdOrCtrl+C",
+			"scope": "outsideText",
+			"nativeAccelerator": false,
+			"trigger": "copy"
+		},
+		{
+			"id": "copy_url",
+			"menu": "entry",
+			"labelKey": "cmd_copy_url",
+			"shortcut": "CmdOrCtrl+U",
+			"scope": "outsideText",
+			"nativeAccelerator": false
+		},
+		{
+			"id": "delete_entry",
+			"menu": "entry",
+			"labelKey": "cmd_delete_entry",
+			"shortcut": "Delete",
+			"scope": "outsideText",
+			"nativeAccelerator": false,
+			"separatorBefore": true
+		},
+
+		{
+			"id": "new_group",
+			"menu": "group",
+			"labelKey": "cmd_new_group",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false
+		},
+		{
+			"id": "rename_group",
+			"menu": "group",
+			"labelKey": "cmd_rename_group",
+			"shortcut": "F2",
+			"scope": "outsideText",
+			"nativeAccelerator": false
+		},
+		{
+			"id": "delete_group",
+			"menu": "group",
+			"labelKey": "cmd_delete_group",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false
+		},
+
+		{
+			"id": "password_generator",
+			"menu": "tools",
+			"labelKey": "cmd_password_generator",
+			"shortcut": "CmdOrCtrl+G",
+			"scope": "global",
+			"nativeAccelerator": true
+		},
+		{
+			"id": "settings",
+			"menu": "tools",
+			"labelKey": "cmd_settings",
+			"shortcut": "CmdOrCtrl+Comma",
+			"scope": "global",
+			"nativeAccelerator": true,
+			"separatorBefore": true
+		},
+		{
+			"id": "database_settings",
+			"menu": "tools",
+			"labelKey": "cmd_database_settings",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false
+		},
+
+		{
+			"id": "keyboard_shortcuts",
+			"menu": "help",
+			"labelKey": "cmd_keyboard_shortcuts",
+			"shortcut": "CmdOrCtrl+Slash",
+			"scope": "global",
+			"nativeAccelerator": true
+		},
+		{
+			"id": "about",
+			"menu": "help",
+			"macMenu": "app",
+			"labelKey": "cmd_about",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false
+		},
+
+		{
+			"id": "demo_external_change",
+			"menu": null,
+			"labelKey": "cmd_demo_external_change",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false,
+			"demoOnly": true
+		},
+		{
+			"id": "demo_save_failure",
+			"menu": null,
+			"labelKey": "cmd_demo_save_failure",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false,
+			"demoOnly": true
+		},
+		{
+			"id": "demo_first_run",
+			"menu": null,
+			"labelKey": "cmd_demo_first_run",
+			"shortcut": null,
+			"scope": "global",
+			"nativeAccelerator": false,
+			"demoOnly": true
+		}
+	]
+}

@@ -73,6 +73,28 @@ keyrust/
 - **Tauri capabilities minime**: nessun accesso FS/shell dal frontend; dialoghi file e operazioni su disco
   passano da comandi Rust dedicati. CSP restrittiva, nessuna risorsa remota.
 
+### Frontend (crates/app/ui)
+```
+src/lib/api/        VaultApi (interfaccia), DemoVault (dati di esempio), AppApi (Tauri o in memoria)
+src/lib/state/      AppState: schermate, selezione, editor, overlay; generazioni di sessione e selezione
+src/lib/commands/   commands.json (fonte unica per menu, scorciatoie, pannello e palette) + matcher
+src/lib/screens/    Unlock/Welcome, Create, Vault
+src/lib/components/ app/ (componenti Keyrust), ui/ (shadcn-svelte vendorizzati)
+```
+- **Nessun routing**: la schermata è stato applicativo (`AppState.screen`), uguale in Tauri e nell'anteprima web.
+- **Confine dei segreti anche nel frontend**: lista e dettaglio ricevono `EntrySummary`/`EntryDetail` senza
+  password; la password arriva solo da `revealField` (mostra) o `getEntryForEdit` (editor). `copyField` non
+  restituisce valori.
+- **Risposte tardive**: ogni chiamata asincrona cattura le generazioni di sessione (unlock/lock/create/cambio
+  database) e di selezione (cambio voce, apertura/chiusura editor) e applica il risultato solo se sono invariate.
+- **Modifiche non salvate**: ogni azione che lascia un editor modificato passa da `requestLeave`
+  (Save / Discard / Keep editing); Lock scarta subito.
+- **Menu nativo**: `crates/app/src/menu.rs` costruisce il menu da `commands.json` con le etichette di
+  `messages/en.json`; un clic emette l'evento `menu` con l'id del comando. Il menu Edit usa le voci
+  predefinite, così copia/incolla funziona nei campi di testo.
+- In Milestone 2 `VaultApi` è implementata solo da `DemoVault`; la Milestone 3 aggiunge l'implementazione IPC
+  con gli stessi metodi, scelta in `src/lib/api/index.ts`.
+
 ## Schema dati
 Il file è KDBX4 standard; Keyrust usa il modello di keepass-rs e preserva tutto ciò che non mostra
 (campi custom, allegati, cronologia, dati personalizzati), così il round-trip con KeePassXC è lossless.

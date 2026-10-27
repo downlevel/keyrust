@@ -79,7 +79,7 @@ fn production_csp_is_strict() {
 fn ipc_commands_are_the_expected_ones() {
     assert_eq!(
         keyrust_app_lib::COMMANDS,
-        ["app_info", "get_settings", "update_settings"]
+        ["app_info", "get_settings", "update_settings", "exit_app"]
     );
     let source = include_str!("../src/lib.rs");
     let handler = source

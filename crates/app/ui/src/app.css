@@ -10,39 +10,82 @@
    only a second set of values (see docs/DESIGN.md). */
 :root {
 	--background: oklch(1 0 0);
-	--foreground: var(--color-zinc-950);
+	--foreground: var(--color-zinc-900);
 	--card: oklch(1 0 0);
-	--card-foreground: var(--color-zinc-950);
+	--card-foreground: var(--color-zinc-900);
 	--popover: oklch(1 0 0);
-	--popover-foreground: var(--color-zinc-950);
-	--primary: var(--color-zinc-900);
-	--primary-foreground: var(--color-zinc-50);
+	--popover-foreground: var(--color-zinc-900);
+	/* Accent: indigo (DESIGN.md). */
+	--primary: var(--color-indigo-600);
+	--primary-hover: var(--color-indigo-700);
+	--primary-foreground: oklch(1 0 0);
 	--secondary: var(--color-zinc-100);
 	--secondary-foreground: var(--color-zinc-900);
 	--muted: var(--color-zinc-100);
 	--muted-foreground: var(--color-zinc-500);
 	--accent: var(--color-zinc-100);
 	--accent-foreground: var(--color-zinc-900);
-	--destructive: oklch(0.577 0.245 27.325);
+	/* Selected rows: indigo-50 background, indigo-800 text, indigo bar. */
+	--selection: var(--color-indigo-50);
+	--selection-foreground: var(--color-indigo-800);
+	--surface: var(--color-zinc-50);
+	--destructive: var(--color-red-600);
+	--destructive-hover: var(--color-red-700);
+	--destructive-foreground: oklch(1 0 0);
+	--destructive-soft: var(--color-red-50);
+	--destructive-soft-border: var(--color-red-200);
+	--destructive-soft-foreground: var(--color-red-900);
+	--success: var(--color-emerald-600);
+	--success-foreground: oklch(1 0 0);
+	--success-text: var(--color-emerald-700);
+	--warning: var(--color-amber-500);
+	--warning-foreground: var(--color-amber-950);
+	--warning-soft: var(--color-amber-50);
+	--warning-soft-border: var(--color-amber-200);
+	--warning-soft-foreground: var(--color-amber-900);
+	--warning-strong: var(--color-amber-700);
+	--strength-1: var(--color-red-600);
+	--strength-2: var(--color-amber-500);
+	--strength-3: var(--color-emerald-500);
+	--strength-4: var(--color-emerald-600);
+	--toast: var(--color-zinc-900);
+	--toast-foreground: var(--color-zinc-50);
+	--toast-icon: var(--color-emerald-400);
+	--overlay: oklch(0.21 0.006 285.885 / 40%);
+	/* Entry initials: six background / text pairs, all WCAG AA. */
+	--avatar-0-bg: var(--color-indigo-50);
+	--avatar-0-fg: var(--color-indigo-700);
+	--avatar-1-bg: var(--color-emerald-50);
+	--avatar-1-fg: var(--color-emerald-700);
+	--avatar-2-bg: var(--color-amber-50);
+	--avatar-2-fg: var(--color-amber-800);
+	--avatar-3-bg: var(--color-sky-50);
+	--avatar-3-fg: var(--color-sky-700);
+	--avatar-4-bg: var(--color-rose-50);
+	--avatar-4-fg: var(--color-rose-700);
+	--avatar-5-bg: var(--color-violet-50);
+	--avatar-5-fg: var(--color-violet-700);
 	--border: var(--color-zinc-200);
-	--input: var(--color-zinc-200);
-	--ring: var(--color-zinc-400);
+	--input: var(--color-zinc-300);
+	--ring: var(--color-indigo-600);
 	--chart-1: var(--color-zinc-300);
 	--chart-2: var(--color-zinc-500);
 	--chart-3: var(--color-zinc-600);
 	--chart-4: var(--color-zinc-700);
 	--chart-5: var(--color-zinc-800);
-	--radius: 0.625rem;
+	/* Components 8px, dialogs 12px (radius-xl). */
+	--radius: 0.5rem;
 	--sidebar: var(--color-zinc-50);
-	--sidebar-foreground: var(--color-zinc-950);
-	--sidebar-primary: var(--color-zinc-900);
-	--sidebar-primary-foreground: var(--color-zinc-50);
+	--sidebar-foreground: var(--color-zinc-700);
+	--sidebar-primary: var(--color-indigo-600);
+	--sidebar-primary-foreground: oklch(1 0 0);
 	--sidebar-accent: var(--color-zinc-100);
 	--sidebar-accent-foreground: var(--color-zinc-900);
 	--sidebar-border: var(--color-zinc-200);
-	--sidebar-ring: var(--color-zinc-400);
+	--sidebar-ring: var(--color-indigo-600);
 }
 
+/* Prepared for the V2 dark theme; nothing sets the .dark class in V1. */
 .dark {
 	--background: var(--color-zinc-950);
 	--foreground: var(--color-zinc-50);
@@ -97,6 +140,32 @@
 	--color-input: var(--input);
 	--color-border: var(--border);
 	--color-destructive: var(--destructive);
+	--color-destructive-hover: var(--destructive-hover);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-destructive-soft: var(--destructive-soft);
+	--color-destructive-soft-border: var(--destructive-soft-border);
+	--color-destructive-soft-foreground: var(--destructive-soft-foreground);
+	--color-success: var(--success);
+	--color-success-foreground: var(--success-foreground);
+	--color-success-text: var(--success-text);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-warning-soft: var(--warning-soft);
+	--color-warning-soft-border: var(--warning-soft-border);
+	--color-warning-soft-foreground: var(--warning-soft-foreground);
+	--color-warning-strong: var(--warning-strong);
+	--color-strength-1: var(--strength-1);
+	--color-strength-2: var(--strength-2);
+	--color-strength-3: var(--strength-3);
+	--color-strength-4: var(--strength-4);
+	--color-selection: var(--selection);
+	--color-selection-foreground: var(--selection-foreground);
+	--color-surface: var(--surface);
+	--color-toast: var(--toast);
+	--color-toast-foreground: var(--toast-foreground);
+	--color-toast-icon: var(--toast-icon);
+	--color-overlay: var(--overlay);
+	--color-primary-hover: var(--primary-hover);
 	--color-accent-foreground: var(--accent-foreground);
 	--color-accent: var(--accent);
 	--color-muted-foreground: var(--muted-foreground);
@@ -128,6 +197,19 @@
 		@apply bg-background text-foreground;
 	}
 	html {
-		@apply font-sans;
+		@apply font-sans text-sm;
+	}
+	:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+		}
 	}
 }
