@@ -4,16 +4,18 @@
 //! boundary unless the user explicitly asks to reveal them (see
 //! docs/ARCHITECTURE.md, "Principi di confine").
 
+mod menu;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use keyrust_core::settings::{self, Settings};
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 /// Names of the IPC commands, kept in sync with `generate_handler!` below and
 /// checked by `tests/security_config.rs`.
-pub const COMMANDS: &[&str] = &["app_info", "get_settings", "update_settings"];
+pub const COMMANDS: &[&str] = &["app_info", "get_settings", "update_settings", "exit_app"];
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -63,6 +65,14 @@ fn update_settings(
     Ok(settings)
 }
 
+/// Quits the application. The UI calls it from the Quit command once unsaved
+/// changes have been handled.
+#[tauri::command]
+fn exit_app(app: AppHandle) {
+    tracing::info!("quit requested");
+    app.exit(0);
+}
+
 /// Logs go to stderr only (no log file), filtered by `KEYRUST_LOG`
 /// (default `info`). See the logging policy in CONTRIBUTING.md.
 fn init_tracing() {
@@ -85,12 +95,22 @@ pub fn run() {
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let current = Mutex::new(settings::load(&path));
             app.manage(SettingsState { path, current });
+            app.set_menu(menu::build(app.handle())?)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            // Only registry commands are forwarded; predefined items (copy,
+            // paste, hide…) are handled natively.
+            if let Ok(registry) = menu::registry() {
+                let known: Vec<String> = registry.commands.into_iter().map(|c| c.id).collect();
+                menu::forward(app, event.id().as_ref(), &known);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
             get_settings,
-            update_settings
+            update_settings,
+            exit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Keyrust application");

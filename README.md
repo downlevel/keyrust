@@ -9,8 +9,8 @@ writes the standard **KDBX4** format, so your database stays a plain file you ow
 KeePassXC, KeePassDX (Android) or Strongbox (iOS), and sync it with Syncthing, Nextcloud or
 Dropbox. No account, no cloud, no telemetry.
 
-> **Status: pre-alpha.** The project is in Milestone 1 (infrastructure). There is no usable vault yet;
-> do not store real passwords in it.
+> **Status: pre-alpha.** Milestone 2 (UI) runs on demo data; opening real databases arrives in Milestone 3.
+> Do not store real passwords in it.
 
 ## Planned features (v1)
 

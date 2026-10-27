@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
+import { svelteTesting } from "@testing-library/svelte/vite";
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
@@ -17,7 +18,14 @@ export default defineConfig(() => ({
 			// "baseLocale" once a second language ships.
 			strategy: ["baseLocale"],
 		}),
+		svelteTesting(),
 	],
+
+	test: {
+		environment: "jsdom",
+		setupFiles: ["./src/tests/setup.ts"],
+		include: ["src/**/*.test.ts"],
+	},
 
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	//

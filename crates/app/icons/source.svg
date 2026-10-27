@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- Placeholder Keyrust icon (Milestone 0): a stylised key on indigo. -->
-  <rect width="1024" height="1024" rx="224" fill="#4f46e5"/>
-  <g fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="372" cy="512" r="140"/>
-    <path d="M512 512h300M732 512v110M640 512v80"/>
+  <!-- Keyrust app icon: a white key on an indigo (#4f46e5) rounded square.
+       Thick strokes and two teeth keep it legible down to 16 px. -->
+  <rect width="1024" height="1024" rx="232" fill="#4f46e5"/>
+  <g fill="none" stroke="#ffffff" stroke-width="92" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="392" cy="404" r="150"/>
+    <path d="M498 510 L788 800"/>
+    <path d="M690 702 L772 620"/>
+    <path d="M590 602 L654 538"/>
   </g>
+  <circle cx="392" cy="404" r="46" fill="#4f46e5"/>
 </svg>

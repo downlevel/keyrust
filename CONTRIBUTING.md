@@ -34,6 +34,20 @@ cd crates/app/ui && pnpm check && pnpm lint && pnpm format:check && pnpm build
 - UI strings are English and go through Paraglide: add them to `crates/app/ui/messages/en.json` and
   use `m.key()` in markup (a test rejects literal text in route markup).
 
+## Commands and shortcuts
+
+Every user action that has a menu item, a shortcut or a palette entry is declared once in
+`crates/app/ui/src/lib/commands/commands.json`. To add one:
+
+1. add the command (`id`, `menu`, `labelKey`, `shortcut`, `scope`, `nativeAccelerator`) and its label to
+   `crates/app/ui/messages/en.json`;
+2. handle the `id` in `AppState.run` (`crates/app/ui/src/lib/state/app.svelte.ts`).
+
+The native menu (`crates/app/src/menu.rs`), the keyboard handler, the *Keyboard Shortcuts* panel and the
+command palette pick it up automatically. Give a command `nativeAccelerator: true` only if its shortcut
+never conflicts with text editing; shortcuts with `scope: "outsideText"` are ignored while typing.
+Tests in both languages check ids, labels and accelerators.
+
 ## Logging policy
 
 Logs use `tracing` and go to stderr only (`KEYRUST_LOG=debug` for more detail).

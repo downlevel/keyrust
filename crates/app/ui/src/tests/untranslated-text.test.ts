@@ -1,15 +1,20 @@
+// @vitest-environment node
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Heuristic check that visible text in route markup goes through m.*():
-// after removing <script>/<style> blocks, {expressions} and tags, nothing but
-// whitespace may remain. It does not inspect attributes (aria-label,
-// placeholder…) nor components outside src/routes.
-const routes = fileURLToPath(new URL("../routes", import.meta.url));
+// Heuristic check that visible text in application markup goes through m.*():
+// after removing <script>/<style> blocks, comments, {expressions} and tags,
+// nothing but whitespace may remain. It does not inspect attributes
+// (aria-label, placeholder…); attribute defaults in components must use m.*()
+// too. Vendored shadcn-svelte components are included: their labels reach users.
+const roots = ["../routes", "../lib/screens", "../lib/components", "../lib/App.svelte"].map((p) =>
+	fileURLToPath(new URL(p, import.meta.url)),
+);
 
 function svelteFiles(dir: string): string[] {
+	if (dir.endsWith(".svelte")) return [dir];
 	return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
 		e.isDirectory()
 			? svelteFiles(join(dir, e.name))
@@ -22,7 +27,8 @@ function svelteFiles(dir: string): string[] {
 function visibleText(markup: string): string {
 	let text = markup
 		.replace(/<script[\s\S]*?<\/script>/g, "")
-		.replace(/<style[\s\S]*?<\/style>/g, "");
+		.replace(/<style[\s\S]*?<\/style>/g, "")
+		.replace(/<!--[\s\S]*?-->/g, "");
 	// Strip {expressions} from the innermost out, so nested braces go too.
 	for (let previous = ""; previous !== text;) {
 		previous = text;
@@ -31,15 +37,22 @@ function visibleText(markup: string): string {
 	return text.replace(/<[^>]*>/g, "").trim();
 }
 
-describe("route markup", () => {
-	const files = svelteFiles(routes);
+describe("application markup", () => {
+	const files = roots.flatMap(svelteFiles);
 
-	it("finds the route files", () => {
-		expect(files.length).toBeGreaterThan(0);
+	it("finds the application files", () => {
+		expect(files.length).toBeGreaterThan(20);
 	});
 
 	it.each(files)("%s has no literal visible text", (file) => {
 		expect(visibleText(readFileSync(file, "utf8"))).toBe("");
+	});
+
+	it("has no literal English defaults in component props", () => {
+		for (const file of files) {
+			const script = readFileSync(file, "utf8").match(/<script[\s\S]*?<\/script>/)?.[0] ?? "";
+			expect(script, file).not.toMatch(/\b(title|description|label)\s*=\s*"[A-Z][a-z]/);
+		}
 	});
 
 	it("detects literal text (self-test)", () => {

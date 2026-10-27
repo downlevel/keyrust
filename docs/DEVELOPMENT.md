@@ -114,16 +114,28 @@ Download it from the run page on GitHub (*Actions* → run → *Artifacts*). The
 Windows SmartScreen and macOS Gatekeeper will warn because they are not signed (on macOS:
 right click → Open).
 
-## Desktop app verification checklist (Windows)
+## Web preview
 
-The development machine has no Tauri system libraries, so the app is compiled only by CI. On Windows:
+The UI runs in a plain browser too: outside Tauri it uses the demo vault and in-memory settings
+(`src/lib/api/index.ts`). `cd crates/app/ui && pnpm dev` serves it at http://127.0.0.1:1420; `pnpm build`
+writes the static site to `crates/app/ui/build/`, which is what gets published as the private preview
+page used to review the design.
 
-- [ ] Download `keyrust-windows-debug` from the latest green CI run and run the installer
-      (SmartScreen: *More info* → *Run anyway*)
-- [ ] A "Keyrust" window opens with the placeholder unlock card (disabled password field and button)
-      and `core v0.0.1` at the bottom
-- [ ] Open DevTools (right click → Inspect, or Ctrl+Shift+I): the console shows **no Content Security
+## Desktop app verification checklist
+
+The development machine has no Tauri system libraries, so the app is compiled only by CI (installers
+on pull requests, pushes to `main` and manual runs). With an installer from a green run
+(Windows SmartScreen: *More info* → *Run anyway*; macOS: right click → *Open*):
+
+- [ ] The "Keyrust" window opens on the Unlock screen with the **Demo data** notice; any password
+      except `wrong` unlocks the sample database
+- [ ] DevTools (right click → Inspect, or Ctrl+Shift+I): the console shows **no Content Security
       Policy violations**
+- [ ] The native menu has File / Edit / Entry / Group / Tools / Help (on macOS also the Keyrust menu);
+      *Entry → New Entry* and *Help → Keyboard Shortcuts* act like Ctrl+N and Ctrl+/
+- [ ] Copy and paste work inside text fields (Ctrl+C / Ctrl+V, or ⌘C / ⌘V on macOS), and Ctrl+C (⌘C)
+      with an entry selected in the list shows "Password copied · clears in 20s"
+- [ ] Settings → General values survive a restart (they are the real `settings.json`)
 - [ ] Optional, from source: `cargo test -p keyrust-core` (with KeePassXC installed) and
       `cd crates/app/ui; pnpm install; pnpm tauri dev`
 - [ ] Optional: in the KeePassXC GUI create two databases with password `keyrust-test-password`

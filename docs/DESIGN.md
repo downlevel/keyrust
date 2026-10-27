@@ -124,7 +124,21 @@ App desktop: finestra minima 800×560.
   - *Errore*: password errata (inline sotto il campo, campo svuotato), file non trovato o non valido, formato non
     supportato, errore di salvataggio (banner con "Retry" e "Save as…"), file modificato esternamente.
 
+## Decisioni prese in Milestone 2
+Dal prototipo approvato (https://claude.ai/artifact/7NiAtLZoAk2V5uZmCcyydh) e dall'implementazione:
+- **Icona per voce**: iniziale del titolo su un colore tenue scelto in modo stabile dal titolo (6 coppie
+  sfondo/testo, token `--avatar-N-*`, tutte AA). Niente favicon (richiederebbero rete).
+- **Pulsanti copy**: Username e URL al passaggio del mouse o al focus da tastiera; Password sempre visibili
+  (reveal e copy), perché è l'azione più frequente.
+- **Banner**: ambra per "modificato da un'altra app" (Reload / Keep mine), rosso per l'errore di salvataggio
+  (Retry / Save as…); stanno sopra il pannello di dettaglio.
+- **Toast**: scuro, in basso al centro, con countdown e pulsante per chiuderlo; regione `aria-live`.
+- **Logo**: chiave bianca su quadrato indaco arrotondato (`crates/app/icons/source.svg`), riusata nel wordmark.
+- **Layout stretto** (800–1100 px): sidebar a icone con pulsante per espanderla.
+- **Copia password**: `Ctrl+C` / `⌘C` con una voce selezionata e il focus fuori dai campi di testo; passa
+  dall'evento `copy`, quindi non interferisce con la copia del testo selezionato.
+- **Modalità demo** (fino alla Milestone 3): badge "Demo data" sempre visibile su Unlock, Create e Vault.
+
 ## Domande aperte
-- Logo / icona dell'app e wordmark "Keyrust". DA DEFINIRE.
-- Icone per voce: solo iniziale colorata, icone KDBX standard o favicon (le favicon richiederebbero rete, quindi no in V1)? DA DEFINIRE.
 - Comportamento esatto del banner "modifica esterna" (dipende dalla strategia di sync, vedi PRD).
+- Wordmark tipografico "Keyrust" oltre all'icona: rimandato.

@@ -25,13 +25,13 @@
 - [x] Persistenza impostazioni app (`settings.json` nella config dir, senza segreti)
 
 ## Milestone 2 — Design (UI scaffolding)
-- [ ] Prototipare l'interfaccia in Claude Design partendo da DESIGN_PROMPT.md e validare la direzione visiva
-- [ ] Impostare design system / libreria componenti e tema (token CSS zinc + indaco, tipografia, raggi), predisposto al dark
-- [ ] Realizzare layout e navigazione: Unlock → Vault a 3 colonne, Settings, menu nativo, routing/stato schermate
-- [ ] Creare i componenti UI ricorrenti: sidebar tree, search input, entry list item, field row, secret input, strength meter, toast, banner, dialog di conferma
-- [ ] Stati vuoto / errore / caricamento per Unlock, Vault, ricerca e salvataggio
-- [ ] Gestione scorciatoie da tastiera e pannello "Keyboard Shortcuts"
-- [ ] Design logo / icona app
+- [x] Prototipare l'interfaccia partendo da DESIGN_PROMPT.md e validare la direzione visiva (prototipo approvato)
+- [x] Impostare design system / libreria componenti e tema (token CSS zinc + indaco, tipografia, raggi), predisposto al dark
+- [x] Realizzare layout e navigazione: Unlock → Vault a 3 colonne, Settings, menu nativo, routing/stato schermate
+- [x] Creare i componenti UI ricorrenti: sidebar tree, search input, entry list item, field row, secret input, strength meter, toast, banner, dialog di conferma
+- [x] Stati vuoto / errore / caricamento per Unlock, Vault, ricerca e salvataggio
+- [x] Gestione scorciatoie da tastiera, pannello "Keyboard Shortcuts" e command palette
+- [x] Design logo / icona app
 
 ## Milestone 3 — Feature core
 ### core (Rust)
