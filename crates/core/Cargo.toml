@@ -11,11 +11,15 @@ publish = false
 
 [dependencies]
 keepass = { version = "=0.17.0", features = ["save_kdbx4"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
 
 [dev-dependencies]
 argon2 = { package = "rust-argon2", version = "3.0" }
 roxmltree = "0.20"
 tempfile = "3"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 chrono = { version = "0.4", default-features = false }
 
 [lints]

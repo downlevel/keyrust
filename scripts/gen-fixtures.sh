@@ -20,3 +20,12 @@ printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" |
 
 echo "Generated $out with $("$CLI" --version | head -n1 | sed 's/^/KeePassXC /')"
 printf '%s\n' "$PASSWORD" | "$CLI" db-info -q "$out"
+
+# KDBX 3.1: what `db-create` produces in KeePassXC 2.7, with one entry.
+out31="$FIXTURES/keepassxc-kdbx31.kdbx"
+rm -f "$out31"
+printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" | "$CLI" db-create -q -p -t 100 "$out31" 2>/dev/null
+printf '%s\n%s\n' "$PASSWORD" "legacy-entry-password" |
+    "$CLI" add -q -u alice --url https://legacy.example -p "$out31" Legacy 2>/dev/null
+echo "Generated $out31"
+printf '%s\n' "$PASSWORD" | "$CLI" db-info -q "$out31"

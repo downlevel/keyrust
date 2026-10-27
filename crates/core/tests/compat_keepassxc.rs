@@ -520,3 +520,97 @@ fn t4_keepassxc_rejects_wrong_password() {
         "no content may leak on a wrong password"
     );
 }
+
+const KDBX31: &str = "keepassxc-kdbx31.kdbx";
+
+/// T5 — keepass-rs reads a KDBX 3.1 database created by `keepassxc-cli db-create`.
+#[test]
+fn t5_keepass_rs_reads_kdbx31() {
+    let db = open(&fixture(KDBX31), FIXTURE_PASSWORD);
+    assert!(matches!(
+        db.config.version,
+        keepass::config::DatabaseVersion::KDB3(1)
+    ));
+    let root = db.root();
+    let entry = root.entry_by_name("Legacy").expect("Legacy entry");
+    assert_eq!(entry.get_username(), Some("alice"));
+    assert_eq!(entry.get_password(), Some("legacy-entry-password"));
+    assert_eq!(entry.get_url(), Some("https://legacy.example"));
+}
+
+/// Number inside `KDF: AES (N rounds)` / `KDF: Argon2id (N rounds, M KB)` of `db-info`.
+fn db_info_kdf(info: &str) -> String {
+    info.lines()
+        .find_map(|l| l.strip_prefix("KDF: "))
+        .unwrap_or_else(|| panic!("no KDF line in db-info: {info}"))
+        .to_string()
+}
+
+/// T6 — the header peek agrees with KeePassXC on a KeePassXC-created file.
+#[test]
+fn t6_header_peek_matches_keepassxc_fixture() {
+    use keyrust_core::kdbx::header::{Cipher, Kdf, peek};
+    let Some(cli) = require_cli("t6_header_peek_matches_keepassxc_fixture") else {
+        return;
+    };
+    let path = fixture(RICH);
+    let summary = peek(&std::fs::read(&path).expect("read fixture")).expect("valid header");
+    assert_eq!((summary.major_version, summary.minor_version), (4, 1));
+    assert_eq!(summary.cipher, Cipher::Aes256);
+    let info = cli.db_info(&path, FIXTURE_PASSWORD);
+    assert!(info.contains("Cipher: AES 256-bit"), "db-info: {info}");
+    let Kdf::AesKdf { rounds } = summary.kdf else {
+        panic!("expected AES-KDF: {summary:?}")
+    };
+    assert_eq!(db_info_kdf(&info), format!("AES ({rounds} rounds)"));
+}
+
+/// T6 — the header peek reads back exactly what keepass-rs wrote, and KeePassXC agrees.
+#[test]
+fn t6_header_peek_matches_created_databases() {
+    use keyrust_core::kdbx::header::{Argon2Variant, Cipher, Kdf, peek};
+    let Some(cli) = require_cli("t6_header_peek_matches_created_databases") else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (outer, cipher, label) in [
+        (OuterCipherConfig::AES256, Cipher::Aes256, "AES 256-bit"),
+        (
+            OuterCipherConfig::ChaCha20,
+            Cipher::ChaCha20,
+            "ChaCha20 256-bit",
+        ),
+    ] {
+        let path = dir.path().join(format!("{label}.kdbx"));
+        save(&create_database(outer), &path, FIXTURE_PASSWORD);
+        let summary = peek(&std::fs::read(&path).expect("read")).expect("valid header");
+        assert_eq!(summary.cipher, cipher);
+        assert_eq!(
+            summary.kdf,
+            Kdf::Argon2 {
+                variant: Argon2Variant::Id,
+                memory_bytes: 16 * 1024 * 1024,
+                iterations: 2,
+                parallelism: 2,
+                version: 0x13,
+            }
+        );
+        let info = cli.db_info(&path, FIXTURE_PASSWORD);
+        assert!(
+            info.contains(&format!("Cipher: {label}")),
+            "db-info: {info}"
+        );
+        assert_eq!(db_info_kdf(&info), "Argon2id (2 rounds, 16384 KB)");
+    }
+}
+
+/// T6 — KDBX 3.1 is reported as unsupported by the KDBX4 header peek.
+#[test]
+fn t6_header_peek_rejects_kdbx31() {
+    use keyrust_core::kdbx::header::{HeaderError, peek};
+    let data = std::fs::read(fixture(KDBX31)).expect("read fixture");
+    assert_eq!(
+        peek(&data),
+        Err(HeaderError::UnsupportedVersion { major: 3, minor: 1 })
+    );
+}

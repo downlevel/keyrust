@@ -1,0 +1,9 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"app_name": "Keyrust",
+	"unlock_master_password_label": "Master password",
+	"unlock_button": "Unlock",
+	"prealpha_notice": "Pre-alpha: database support coming in Milestone 3.",
+	"core_version": "core v{version}",
+	"core_version_unavailable": "core version unavailable outside Tauri"
+}

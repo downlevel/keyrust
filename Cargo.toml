@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/app"]
+# cargo-fuzz targets live in their own workspace (nightly only).
+exclude = ["fuzz"]
 # The Tauri app needs platform GUI libraries (WebView2 / webkit2gtk) to build;
 # plain `cargo build` / `cargo test` at the root only touch the portable core.
 default-members = ["crates/core"]

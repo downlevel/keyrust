@@ -1,0 +1,97 @@
+//! The logging policy (CONTRIBUTING.md): at `info` and above, logs carry events,
+//! error kinds and counts, never values or file paths.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+
+use keyrust_core::kdbx::header;
+use keyrust_core::settings::{self, Settings};
+use tracing_subscriber::fmt::MakeWriter;
+
+#[derive(Clone, Default)]
+struct Capture(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Capture {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for Capture {
+    type Writer = Capture;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// Runs `f` with a subscriber that records `level` and above, returns the log.
+fn logs_at(level: tracing::Level, f: impl FnOnce()) -> String {
+    let capture = Capture::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(capture.clone())
+        .with_max_level(level)
+        .without_time()
+        .with_ansi(false)
+        .finish();
+    tracing::subscriber::with_default(subscriber, f);
+    String::from_utf8(capture.0.lock().unwrap().clone()).unwrap()
+}
+
+#[test]
+fn settings_and_header_operations_log_no_values_or_paths_at_info() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir_name = dir.path().file_name().unwrap().to_str().unwrap().to_owned();
+    let path = dir.path().join("settings.json");
+    let recent = "/home/someone/Private Vault 7f3a.kdbx";
+    let mut settings = Settings {
+        clipboard_clear_secs: 137,
+        ..Settings::default()
+    };
+    settings.push_recent_file(recent.into());
+
+    let run = || {
+        settings::save(&path, &settings).unwrap();
+        settings::load(&path);
+        std::fs::write(&path, b"{ corrupt 7f3a").unwrap();
+        settings::load(&path);
+        let _ = header::peek(b"not a database");
+    };
+
+    let info = logs_at(tracing::Level::INFO, run);
+    // The operations do log events at info and above...
+    assert!(info.contains("settings saved"), "log: {info}");
+    assert!(info.contains("settings file is not valid"), "log: {info}");
+    // ...but no values, file contents or paths.
+    for forbidden in [
+        recent,
+        "Private Vault",
+        "7f3a",
+        "137",
+        dir_name.as_str(),
+        "settings.json",
+    ] {
+        assert!(
+            !info.contains(forbidden),
+            "`{forbidden}` leaked into info logs:\n{info}"
+        );
+    }
+}
+
+#[test]
+fn file_paths_appear_only_at_debug() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let debug = logs_at(tracing::Level::DEBUG, || {
+        settings::save(&path, &Settings::default()).unwrap();
+    });
+    assert!(
+        debug.contains("settings.json"),
+        "debug log should name the file: {debug}"
+    );
+}
