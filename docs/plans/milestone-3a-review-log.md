@@ -40,3 +40,16 @@
   - **R6** directory dei lock in `/tmp` condivisa tra utenti (e deviazione non documentata dal piano) → lock accanto
     al database come da piano, permessi 0600.
 - Effetto collaterale accettato: anche `settings.json` (che usa lo stesso helper per il tmp) ora nasce con permessi 0600.
+- CI su 66bf1ea (run 40589699239): core Linux/Windows/macOS, deny e fuzz **success** (V1–V5 anche con KeePassXC recente);
+  i job app sono stati annullati dal push successivo.
+
+## Inspection 2 — Codex codex-cli 0.164.0 (sessione nuova 01a17f58-b2c0-76d0-8d5e-536bf0bb4f2e) — REVISE, 3 medium
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3ai2/claudex-h_8ie1_4/result.json` (snapshot 065e4f1). Tutti **ACCETTATI** (secondo e ultimo round di
+  correzioni); i 3 test nuovi del vault falliscono sul codice di 065e4f1 e passano dopo (54 unit verdi):
+  - **M3A-01** `Debug` derivato delle viste esponeva username, URL, note e nomi → `Debug` redatto per tutte le viste.
+  - **M3A-02** parametri Argon2 validati solo singolarmente (lanes vs memoria, overflow della memoria in keepass-rs,
+    errori della calibrazione ignorati) → `kdf::validate` condiviso da vault e calibrazione; `calibrate` restituisce
+    `Result`.
+  - **M3A-03** il salvataggio attraverso un link simbolico sostituiva il link → il vault risolve il percorso reale
+    all'apertura e alla creazione (cartella).
+- **Budget di ispezione esaurito** (MAX_INSPECTION_ROUNDS=2): queste correzioni non sono state ispezionate da Codex.

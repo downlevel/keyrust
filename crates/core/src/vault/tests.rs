@@ -673,3 +673,74 @@ fn the_save_lock_lives_next_to_the_database() {
     let lock = f.path.with_file_name(".test.kdbx.keyrust-lock");
     assert!(lock.exists());
 }
+
+// ------------------------------------------------------------------ second inspection regressions
+
+#[test]
+fn views_debug_output_reveals_no_content() {
+    let (_f, mut vault) = new_vault();
+    let root = vault.tree().id;
+    vault
+        .create_group(root, "Secret Group 51f0")
+        .expect("group");
+    let id = vault
+        .save_entry(&draft(&vault, "Bank", "s3cret-p4ss"))
+        .expect("save");
+    let shown = format!(
+        "{:?} {:?} {:?} {:?}",
+        vault.list_entries(),
+        vault.get_entry(id).expect("detail"),
+        vault.tree(),
+        vault.info()
+    );
+    for value in [
+        "Bank",
+        "Bank-user",
+        "Bank.example",
+        "notes of Bank",
+        "Secret Group",
+        "Test",
+    ] {
+        assert!(!shown.contains(value), "{value} leaked in {shown}");
+    }
+}
+
+#[test]
+fn kdf_parameters_are_validated_as_a_whole() {
+    let (_f, mut vault) = new_vault();
+    let before = vault.info().kdf;
+    for bad in [
+        Argon2idParams {
+            memory_mib: 8,
+            iterations: 1,
+            parallelism: 2048,
+        },
+        Argon2idParams {
+            memory_mib: 4_194_312,
+            iterations: 1,
+            parallelism: 1,
+        },
+    ] {
+        assert!(vault.set_kdf(bad).is_err(), "{bad:?}");
+    }
+    assert_eq!(vault.info().kdf, before);
+    assert!(!vault.is_dirty());
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_through_a_symbolic_link_updates_the_target() {
+    let (f, _vault) = new_vault();
+    let link = f.path.with_file_name("link.kdbx");
+    std::os::unix::fs::symlink(&f.path, &link).expect("symlink");
+    let mut vault = Vault::open(&link, secret(PASSWORD)).expect("open through the link");
+    vault.rename_database("Through the link").expect("rename");
+    vault.save().expect("save");
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .expect("meta")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(reopen(&f).info().name, "Through the link");
+}

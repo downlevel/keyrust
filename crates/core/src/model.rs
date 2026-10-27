@@ -35,7 +35,7 @@ pub enum Field {
     Notes,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntrySummary {
     pub id: EntryId,
@@ -45,7 +45,7 @@ pub struct EntrySummary {
     pub url: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryDetail {
     pub summary: EntrySummary,
@@ -80,7 +80,7 @@ impl fmt::Debug for EntryDraft {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupNode {
     pub id: GroupId,
@@ -134,7 +134,7 @@ pub struct Argon2idParams {
     pub parallelism: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseInfo {
     pub name: String,
@@ -158,6 +158,50 @@ impl fmt::Debug for CreateOptions {
         f.debug_struct("CreateOptions")
             .field("cipher", &self.cipher)
             .field("kdf", &self.kdf)
+            .finish_non_exhaustive()
+    }
+}
+
+// Views carry vault content (titles, usernames, URLs, notes, names): their
+// Debug output shows identifiers and counts only, so it is safe in logs.
+
+impl fmt::Debug for EntrySummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EntrySummary")
+            .field("id", &self.id)
+            .field("group_id", &self.group_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for EntryDetail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EntryDetail")
+            .field("summary", &self.summary)
+            .field("has_password", &self.has_password)
+            .field("history_len", &self.history_len)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for GroupNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GroupNode")
+            .field("id", &self.id)
+            .field("entry_count", &self.entry_count)
+            .field("is_recycle_bin", &self.is_recycle_bin)
+            .field("children", &self.children)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for DatabaseInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DatabaseInfo")
+            .field("cipher", &self.cipher)
+            .field("kdf", &self.kdf)
+            .field("recycle_bin", &self.recycle_bin)
+            .field("version", &self.version)
             .finish_non_exhaustive()
     }
 }

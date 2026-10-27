@@ -135,6 +135,12 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
   - Le eliminazioni definitive scrivono tombstone in `DeletedObjects`.
   - I file KDBX 3.1 e 4.0 vengono salvati come KDBX 4.1 (keepass-rs scrive solo 4.1).
   - Un database AES-KDF o Argon2d mantiene la sua KDF finché l'utente non sceglie Argon2id.
+  - Il vault lavora sul percorso reale del file (i link simbolici vengono risolti all'apertura), così il salvataggio
+    aggiorna il file di destinazione e non sostituisce il link.
+  - I parametri Argon2id sono validati per intero (`kdf::validate`: limiti di keepass-rs e di Argon2, almeno 8 KiB per
+    lane) prima di toccare il vault.
+  - Il `Debug` di tutte le viste (`EntrySummary`, `EntryDetail`, `GroupNode`, `DatabaseInfo`, `EntryDraft`, `Vault`)
+    mostra solo identificatori e conteggi.
 - **Auto-clear clipboard**: dopo la copia parte un timer; alla scadenza svuota gli appunti **solo se** contengono
   ancora il valore copiato (confronto su hash, così non cancella ciò che l'utente ha copiato dopo).
   Hint di esclusione dalla cronologia (KDE/Windows) dove `arboard` lo supporta. Svuotamento anche al lock e all'uscita.

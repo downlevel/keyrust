@@ -122,9 +122,7 @@ fn kdf_info(config: &KdfConfig) -> KdfInfo {
 }
 
 fn argon2id(params: Argon2idParams) -> Result<KdfConfig> {
-    if params.memory_mib < 8 || params.iterations < 1 || params.parallelism < 1 {
-        return Err(VaultError::Invalid("key derivation parameters"));
-    }
+    crate::kdf::validate(&params).map_err(|_| VaultError::Invalid("key derivation parameters"))?;
     Ok(KdfConfig::Argon2id {
         iterations: u64::from(params.iterations),
         memory: u64::from(params.memory_mib) * 1024 * 1024,
@@ -173,6 +171,9 @@ impl Vault {
     /// Opens a database file. The file is read once; the model and the stamp
     /// used to detect external changes both come from those bytes.
     pub fn open(path: &Path, password: SecretString) -> Result<Self> {
+        // Saving replaces a file by rename: through a symbolic link that would
+        // replace the link, so the vault keeps the link's target instead.
+        let path = &std::fs::canonicalize(path)?;
         let bytes = std::fs::read(path)?;
         file::fire(Phase::OpenAfterRead);
         let mut vault = Self::open_bytes(&bytes, password)?;
@@ -206,6 +207,13 @@ impl Vault {
         if options.password.expose_secret().is_empty() {
             return Err(VaultError::Invalid("master password"));
         }
+        // Resolve the folder (it may be a link); the file itself is new.
+        let path = &match (path.parent(), path.file_name()) {
+            (Some(dir), Some(name)) if !dir.as_os_str().is_empty() => {
+                std::fs::canonicalize(dir)?.join(name)
+            }
+            _ => std::path::absolute(path)?,
+        };
         let mut config = DatabaseConfig::default();
         config.outer_cipher_config = outer_cipher(options.cipher)?;
         config.inner_cipher_config = InnerCipherConfig::ChaCha20;
