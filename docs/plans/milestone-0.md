@@ -28,9 +28,10 @@ lossless con KeePassXC, il rischio tecnico principale del progetto.
    `.gitignore`, `.gitattributes` (fixture `.kdbx` binarie, `eol=lf` per testo), `docs/DEVELOPMENT.md` con le istruzioni Windows.
 4. `.gitignore` ignora `target/`, `node_modules/`, `dist/`, `.env*`, `*.kdbx.tmp` e **ogni `*.kdbx` tranne
    `tests/fixtures/**`** (protezione contro il commit accidentale di un vault reale).
-5. **Spike keepass-rs** (dettagli sotto) con test automatici che passano qui con `KEYRUST_REQUIRE_KEEPASSXC=1`, e un
+5. **Spike keepass-rs** (dettagli sotto) con test automatici che passano qui (con `keepassxc-cli` presente), e un
    rapporto `docs/spikes/0001-keepass-rs-kdbx4.md` con esito PASS/GAP/UNVERIFIED per ogni capability, la versione testata e una decisione.
-6. Scaffold Tauri 2 in `crates/app` (Rust) + frontend in `crates/app/ui` (Svelte 5 + TypeScript + Vite, pnpm),
+6. Scaffold Tauri 2 in `crates/app` (Rust) + frontend in `crates/app/ui` (**SvelteKit in modalità SPA con
+   adapter-static** + Svelte 5 + TypeScript + Vite, pnpm — come il template ufficiale Tauri `svelte-ts`; *rev. build*),
    Tailwind CSS v4 (`@tailwindcss/vite`), shadcn-svelte inizializzato con base color **zinc** e almeno i componenti
    `button` e `input`, font Inter e JetBrains Mono bundlati via `@fontsource*`, icone `@lucide/svelte`.
    Una schermata placeholder (wordmark "Keyrust", input password disabilitato con label "Master password",
@@ -93,9 +94,12 @@ con un parser XML (`roxmltree`, dev-dependency, portabile su Windows).
   le String con valore e flag protetto, Binary risolti per contenuto, Tags, Times, AutoType, CustomData, History ricorsiva),
   DeletedObjects (asserendo che il tombstone noto sia presente e non vuoto, non solo che le due collezioni coincidano).
   Il test asserisce anche che l'export dell'originale contenga ogni capability verificata da T0, così un confronto
-  "vuoto = vuoto" non può passare. **Normalizzazioni ammesse, elencate esplicitamente nel codice e nel rapporto**: campi Meta che il
-  salvataggio legittimamente aggiorna (es. `Generator`, `HeaderHash`, timestamp di modifica di Meta,
-  `SettingsChanged`), e l'ordine degli elementi `Binary` nel pool Meta (risolti per contenuto). Ogni altra differenza
+  "vuoto = vuoto" non può passare. **Normalizzazioni ammesse, elencate esplicitamente nel codice e nel rapporto**
+  (*rev. build*, ridotte a quelle osservate necessarie): l'item CustomData `_LAST_MODIFIED`, che `keepassxc-cli export`
+  valorizza con l'ora dell'export; l'ordine degli item CustomData (mappa, esportata in ordine non deterministico);
+  i riferimenti `Ref` agli allegati, risolti per contenuto tramite `keepassxc-cli attachment-export` (l'export XML
+  di KeePassXC non contiene i byte degli allegati). Nessun campo Meta normalizzato (`Generator` incluso). T2 attende
+  >1 s tra i due export perché valori dipendenti dall'ora non possano coincidere per caso. Ogni altra differenza
   fa fallire il test con un diff leggibile.
 - **T3 Creazione (keepass-rs → KeePassXC)**: crea da zero con keepass-rs un DB KDBX4 con **Argon2id** (parametri
   espliciti piccoli per velocità di test, es. 16 MiB / 2 iterazioni / p=2) e cipher esterno **AES-256** e, in un
@@ -104,9 +108,10 @@ con un parser XML (`roxmltree`, dev-dependency, portabile su Windows).
   corrisponda; verifica con `keepassxc-cli db-info` il KDF/cipher dichiarato.
 - **T4 Password errata**: keepass-rs rifiuta la fixture con password sbagliata con un errore (nessun panic), e
   `keepassxc-cli` rifiuta il file creato in T3 con password sbagliata.
-- **Gating**: i test che richiedono `keepassxc-cli` lo cercano nel PATH (o in `KEEPASSXC_CLI`). Se assente: se
-  `KEYRUST_REQUIRE_KEEPASSXC=1` falliscono, altrimenti stampano un avviso visibile e terminano senza asserire
-  (non contano come verifica). T1 e T4-parte-keepass-rs non richiedono la CLI.
+- **Gating** (*rev. ispezione M0-001*): i test che richiedono `keepassxc-cli` lo cercano nel PATH (o in
+  `KEEPASSXC_CLI`). Se assente **falliscono**: il test harness nasconde l'output dei test riusciti, quindi uno skip
+  con avviso sarebbe invisibile. Saltarli è un opt-out esplicito (`KEYRUST_SKIP_KEEPASSXC=1`) scelto da chi esegue
+  i test, e non conta come verifica. T1 e T4-parte-keepass-rs non richiedono la CLI.
 - La password passa a `keepassxc-cli` solo via stdin, mai come argomento di riga di comando.
 
 ### Esito di un gap
@@ -118,9 +123,13 @@ non veritiero.
 
 ## Scaffold app — approccio
 - Struttura: `crates/app/{Cargo.toml, build.rs, src/main.rs, src/lib.rs, tauri.conf.json, capabilities/default.json, icons/}`
-  e `crates/app/ui/` (package.json, vite, svelte, src/). `tauri.conf.json`: `build.frontendDist = "ui/dist"`,
-  `beforeDevCommand`/`beforeBuildCommand` con `cwd: "ui"`. `@tauri-apps/cli` come devDependency del frontend
-  (script `pnpm tauri`).
+  e `crates/app/ui/` (package.json, vite, svelte, src/). `tauri.conf.json`: `build.frontendDist = "ui/build"`
+  (output di adapter-static; *rev. build*), `beforeDevCommand`/`beforeBuildCommand` con `cwd: "ui"`, nessun campo
+  `version` (Tauri usa la versione del crate; il campo accetta solo un `package.json`). `@tauri-apps/cli` come
+  devDependency del frontend; lo script `pnpm tauri` esegue `cd .. && tauri` perché la CLI trova
+  `tauri.conf.json` solo partendo da `crates/app` (*rev. build*, verificato con `tauri info`).
+- Utility shadcn `cn` implementata con `clsx` + `tailwind-merge` (non il pacchetto `cn`, pubblicato da pochi giorni);
+  stile shadcn-svelte `vega` con i token colore rimappati su `--color-zinc-*` di Tailwind (*rev. build*).
 - Generato partendo dal template ufficiale (`create-tauri-app`, template svelte-ts) e poi riorganizzato, non scritto
   a memoria; dipendenze con versioni esatte risolte nei lockfile (`Cargo.lock`, `pnpm-lock.yaml`).
 - Icone: icone placeholder generate con `pnpm tauri icon` da un SVG semplice (chiave stilizzata) in `crates/app/icons/source.svg`.
@@ -135,28 +144,29 @@ non veritiero.
 ## Rischi residui
 - Il crate `keyrust-app` **non viene compilato qui**: errori di compilazione o configurazione Tauri emergono solo su
   Windows. Mitigazione: codice Rust dell'app minimale e derivato dal template ufficiale; `cargo metadata` e
-  `cargo deny` coprono comunque la risoluzione delle dipendenze; checklist Windows dettagliata in `docs/DEVELOPMENT.md`.
+  `cargo deny` coprono comunque la risoluzione delle dipendenze; `tauri info` verifica la lettura della configurazione;
+  checklist Windows dettagliata in `docs/DEVELOPMENT.md`.
 - Nessun clippy sul crate app qui (vale lo stesso).
-- `cargo-deny`: installato da binario di release ufficiale (GitHub `EmbarkStudios/cargo-deny`) nel `~/.cargo/bin`;
-  se il download fallisce, `cargo install cargo-deny --locked` (più lento, più disco).
+- `cargo-deny`: installato con `cargo install cargo-deny --locked` da crates.io (il download del binario di release
+  è stato negato dal sistema di permessi; *rev. build*).
 - Spazio disco: monitorare; `target/` di core + test è stimato < 1.5 GB.
 
 ## Verifica (comandi di prova, eseguiti dall'host su Linux)
 ```
 cargo fmt --all --check                                            # atteso: nessun output, exit 0
 cargo clippy -p keyrust-core --all-targets -- -D warnings          # atteso: exit 0
-KEYRUST_REQUIRE_KEEPASSXC=1 cargo test -p keyrust-core             # atteso: tutti passano (eventuali GAP ignorati e documentati)
+cargo test -p keyrust-core                                         # atteso: tutti passano (eventuali GAP ignorati e documentati)
 cargo deny check                                                   # atteso: advisories/bans/licenses/sources ok (workspace intero, incluso app)
 cargo metadata --format-version 1 >/dev/null                       # atteso: exit 0 (workspace e app risolvono)
-cd crates/app/ui && pnpm install --frozen-lockfile && pnpm check && pnpm lint && pnpm format:check && pnpm build   # atteso: exit 0, ui/dist creato
+cd crates/app/ui && pnpm install --frozen-lockfile && pnpm check && pnpm lint && pnpm format:check && pnpm build   # atteso: exit 0, ui/build creato
+cd crates/app && ui/node_modules/.bin/tauri info   # atteso: sezione "App" con CSP e frontendDist ui/build
 bash scripts/gen-fixtures.sh && git status --porcelain tests/fixtures   # rigenera: nessuna differenza semantica (T1/T2 ancora verdi)
 git ls-files | grep -E '\.kdbx$'                                   # atteso: solo file sotto tests/fixtures/
 ```
 Controlli manuali:
 - Leggere il rapporto dello spike e confrontarlo con l'output reale dei test (nessun PASS dichiarato senza test).
 - Sanity check su un file reale: un DB creato da T3 riaperto con `keepassxc-cli ls`/`show -s` mostra i valori attesi.
-- **Su Windows (utente)**, checklist in `docs/DEVELOPMENT.md`: `cargo test -p keyrust-core` (con KeePassXC installato e
-  `KEYRUST_REQUIRE_KEEPASSXC=1`), `cargo clippy --workspace --all-targets -- -D warnings`, `pnpm tauri dev` dalla
+- **Su Windows (utente)**, checklist in `docs/DEVELOPMENT.md`: `cargo test -p keyrust-core` (con KeePassXC installato), `cargo clippy --workspace --all-targets -- -D warnings`, `pnpm tauri dev` dalla
   cartella `crates/app/ui` → si apre la finestra con la schermata placeholder e la versione; DevTools console senza
   violazioni CSP; `pnpm tauri build` produce un installer.
 

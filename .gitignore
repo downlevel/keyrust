@@ -1,0 +1,30 @@
+# Rust
+/target/
+
+# Frontend
+node_modules/
+dist/
+crates/app/ui/build/
+crates/app/ui/.svelte-kit/
+
+# Tauri generated schemas
+crates/app/gen/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# KeePass databases: never commit a real vault. Only test fixtures are allowed.
+*.kdbx
+*.kdbx.tmp
+*.kdb
+*.key
+*.keyx
+!tests/fixtures/**/*.kdbx
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+.idea/

@@ -1,14 +1,16 @@
 # Roadmap — Keyrust
 
 ## Milestone 0 — Setup
-- [ ] `git init`, repo GitHub pubblico `keyrust`, branch `main` protetto
-- [ ] `LICENSE` GPL-3.0-or-later, `README.md` scheletro, `CONTRIBUTING.md`, `.editorconfig`, `.gitignore`
-- [ ] Workspace Cargo con `crates/core` e `crates/app`; `rust-toolchain.toml` con toolchain fissata
-- [ ] Verificare il supporto KDBX4 in scrittura di `keepass-rs` (feature flag, round-trip lossless di campi custom/allegati/cronologia) con uno spike
-- [ ] Scaffold Tauri 2 + Svelte 5 + TypeScript + Vite in `crates/app` (pnpm)
-- [ ] Tailwind CSS + shadcn-svelte, font Inter e JetBrains Mono bundlati, icone Lucide
-- [ ] Configurare `rustfmt`, `clippy` (`-D warnings`), ESLint + Prettier, `cargo deny`
-- [ ] Bozza `SECURITY.md`: threat model (cosa protegge / cosa no) e policy di segnalazione vulnerabilità
+- [x] `git init` (repo locale, branch `main`)
+- [ ] Repo GitHub pubblico `keyrust`, branch `main` protetto *(in attesa di autorizzazione)*
+- [x] `LICENSE` GPL-3.0-or-later, `README.md` scheletro, `CONTRIBUTING.md`, `.editorconfig`, `.gitignore`
+- [x] Workspace Cargo con `crates/core` e `crates/app`; `rust-toolchain.toml` con toolchain fissata
+- [x] Verificare il supporto KDBX4 in scrittura di `keepass-rs` (feature flag, round-trip lossless di campi custom/allegati/cronologia) con uno spike → [spike 0001](spikes/0001-keepass-rs-kdbx4.md): adottato
+- [ ] Fixture KeePassXC create dalla GUI con Argon2id + ChaCha20 e Argon2d *(su Windows, vedi DEVELOPMENT.md)*
+- [x] Scaffold Tauri 2 + SvelteKit (SPA) / Svelte 5 + TypeScript + Vite in `crates/app` (pnpm) — compilazione e avvio *(da verificare su Windows)*
+- [x] Tailwind CSS + shadcn-svelte, font Inter e JetBrains Mono bundlati, icone Lucide
+- [x] Configurare `rustfmt`, `clippy` (`-D warnings`), ESLint + Prettier, `cargo deny`
+- [x] Bozza `SECURITY.md`: threat model (cosa protegge / cosa no) e policy di segnalazione vulnerabilità
 
 ## Milestone 1 — Infrastruttura
 - [ ] GitHub Actions: matrice Linux/Windows/macOS con fmt, clippy, test Rust, lint/test frontend, `tauri build`

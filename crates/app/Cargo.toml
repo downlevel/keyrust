@@ -1,0 +1,32 @@
+[package]
+name = "keyrust-app"
+description = "Keyrust desktop app (Tauri 2 shell around keyrust-core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+default-run = "keyrust"
+
+[lib]
+# Distinct lib name: on Windows a lib and bin with the same name collide
+# (https://github.com/rust-lang/cargo/issues/8519).
+name = "keyrust_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "keyrust"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+keyrust-core = { path = "../core" }
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

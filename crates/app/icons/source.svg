@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Placeholder Keyrust icon (Milestone 0): a stylised key on indigo. -->
+  <rect width="1024" height="1024" rx="224" fill="#4f46e5"/>
+  <g fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="372" cy="512" r="140"/>
+    <path d="M512 512h300M732 512v110M640 512v80"/>
+  </g>
+</svg>

@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/app"]
+# The Tauri app needs platform GUI libraries (WebView2 / webkit2gtk) to build;
+# plain `cargo build` / `cargo test` at the root only touch the portable core.
+default-members = ["crates/core"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+authors = ["Mauro Giulivi"]
+repository = "https://github.com/maurogiulivi/keyrust"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+
+# The KDBX key derivation (AES-KDF / Argon2) is unbearably slow unoptimised;
+# optimise dependencies even in dev/test builds.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Release profile for the desktop app (https://tauri.app/concept/size/).
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
