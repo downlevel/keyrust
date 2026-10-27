@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryAppApi, normalizeSettings, DEFAULT_SETTINGS } from "$lib/api/app";
 import { DemoVault } from "$lib/api/demo";
 import { AppState } from "$lib/state/app.svelte";
+import type { Settings } from "$lib/api";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -338,5 +339,60 @@ describe("inspection regressions", () => {
 		expect(app.confirm).toMatchObject({ kind: "deleteEntry", permanent: true });
 		await app.confirmDelete();
 		expect(app.entries.some((e) => e.id === "reddit")).toBe(false);
+	});
+});
+
+describe("second inspection regressions", () => {
+	it("one editor save at a time; no edits or navigation while it runs (M2-R201, M2-R202)", async () => {
+		const { app, vault } = await unlocked();
+		await app.newEntry();
+		app.updateDraft({ title: "Netflix" });
+		const late = deferred<string>();
+		const realSave = vault.saveEntry.bind(vault);
+		let saves = 0;
+		vault.saveEntry = async (draft) => {
+			saves++;
+			await late.promise;
+			return realSave(draft);
+		};
+		const first = app.saveEditor();
+		expect(app.savingEntry).toBe(true);
+		expect(await app.saveEditor()).toBe(false);
+		app.updateDraft({ title: "Changed meanwhile" });
+		expect(app.editor?.draft.title).toBe("Netflix");
+		await app.newEntry();
+		await app.selectEntry("gitlab");
+		expect(app.editor?.draft.title).toBe("Netflix");
+		late.resolve("");
+		expect(await first).toBe(true);
+		expect(saves).toBe(1);
+		expect(app.entries.filter((e) => e.title === "Netflix")).toHaveLength(1);
+		expect(app.savingEntry).toBe(false);
+	});
+
+	it("settings writes go out in order and the last answer wins (M2-R203)", async () => {
+		const appApi = new MemoryAppApi();
+		const app = new AppState({ vault: new DemoVault({ delayMs: 0 }), app: appApi });
+		await app.init();
+		const sent: Settings[] = [];
+		const answers: (() => void)[] = [];
+		const real = appApi.updateSettings.bind(appApi);
+		appApi.updateSettings = (s) => {
+			sent.push(s);
+			return new Promise((resolve) => answers.push(() => resolve(real(s))));
+		};
+		const a = app.updateSettings({ clipboard_clear_secs: 30 });
+		const b = app.updateSettings({ lock_on_minimize: true });
+		await new Promise((r) => setTimeout(r, 0));
+		expect(sent).toHaveLength(1);
+		answers[0]();
+		await a;
+		expect(app.settings.lock_on_minimize).toBe(true);
+		await new Promise((r) => setTimeout(r, 0));
+		expect(sent).toHaveLength(2);
+		expect(sent[1]).toMatchObject({ clipboard_clear_secs: 30, lock_on_minimize: true });
+		answers[1]();
+		await b;
+		expect(app.settings).toMatchObject({ clipboard_clear_secs: 30, lock_on_minimize: true });
 	});
 });

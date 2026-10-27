@@ -7,10 +7,10 @@ import { describe, expect, it } from "vitest";
 // Heuristic check that visible text in application markup goes through m.*():
 // after removing <script>/<style> blocks, comments, {expressions} and tags,
 // nothing but whitespace may remain. It does not inspect attributes
-// (aria-label, placeholder…). Vendored shadcn-svelte components in
-// src/lib/components/ui are not application text and are skipped.
-const roots = ["../routes", "../lib/screens", "../lib/components/app", "../lib/App.svelte"].map(
-	(p) => fileURLToPath(new URL(p, import.meta.url)),
+// (aria-label, placeholder…); attribute defaults in components must use m.*()
+// too. Vendored shadcn-svelte components are included: their labels reach users.
+const roots = ["../routes", "../lib/screens", "../lib/components", "../lib/App.svelte"].map((p) =>
+	fileURLToPath(new URL(p, import.meta.url)),
 );
 
 function svelteFiles(dir: string): string[] {
@@ -46,6 +46,13 @@ describe("application markup", () => {
 
 	it.each(files)("%s has no literal visible text", (file) => {
 		expect(visibleText(readFileSync(file, "utf8"))).toBe("");
+	});
+
+	it("has no literal English defaults in component props", () => {
+		for (const file of files) {
+			const script = readFileSync(file, "utf8").match(/<script[\s\S]*?<\/script>/)?.[0] ?? "";
+			expect(script, file).not.toMatch(/\b(title|description|label)\s*=\s*"[A-Z][a-z]/);
+		}
 	});
 
 	it("detects literal text (self-test)", () => {

@@ -132,6 +132,7 @@
 	"generator_use": "Use password",
 	"generator_copy_hint": "Open an entry in the editor to use the password.",
 	"generator_close": "Close",
+	"dialog_close": "Close",
 
 	"toast_copied": "{field} copied · clears in {secs}s",
 	"toast_dismiss": "Dismiss",

@@ -7,6 +7,7 @@
 	import DialogPortal from "./dialog-portal.svelte";
 	import type { Snippet } from "svelte";
 	import type { ComponentProps } from "svelte";
+	import { m } from "$lib/paraglide/messages.js";
 
 	let {
 		ref = $bindable(null),
@@ -44,7 +45,7 @@
 						{...props}
 					>
 						<XIcon />
-						<span class="sr-only">Close</span>
+						<span class="sr-only">{m.dialog_close()}</span>
 					</Button>
 				{/snippet}
 			</DialogPrimitive.Close>

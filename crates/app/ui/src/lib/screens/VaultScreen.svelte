@@ -28,6 +28,9 @@
 	const collapsed = $derived(narrow && !expanded);
 
 	let list = $state<HTMLElement | null>(null);
+	const selectionVisible = $derived(
+		!app.editor?.isNew && app.visibleEntries.some((e) => e.id === app.selectedId),
+	);
 
 	const caption = $derived(
 		app.visibleEntries.length === 1
@@ -167,10 +170,12 @@
 			aria-label={m.entries_label()}
 			class="flex-1 overflow-y-auto p-1.5"
 		>
-			{#each app.visibleEntries as entry (entry.id)}
+			{#each app.visibleEntries as entry, index (entry.id)}
+				{@const selected = entry.id === app.selectedId && !app.editor?.isNew}
 				<EntryListItem
 					{entry}
-					selected={entry.id === app.selectedId && !app.editor?.isNew}
+					{selected}
+					tabbable={selected || (!selectionVisible && index === 0)}
 					onselect={() => void app.selectEntry(entry.id)}
 					onopen={() => void app.editEntry(entry.id)}
 					onkeydown={(e) => onEntryKeydown(e, entry.id)}

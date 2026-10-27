@@ -74,6 +74,8 @@ export class AppState {
 	detail = $state<EntryDetail | null>(null);
 	revealed = $state<string | null>(null);
 	editor = $state<EditorState | null>(null);
+	/** An editor save is in flight: the form and navigation wait for it. */
+	savingEntry = $state(false);
 
 	toast = $state<{ field: Field; secs: number } | null>(null);
 	banner = $state<"externalChange" | "saveFailed" | null>(null);
@@ -103,6 +105,9 @@ export class AppState {
 	 * never replace or lock a newer session.
 	 */
 	private sessionOps: Promise<void> = Promise.resolve();
+	/** Settings writes go out one at a time; only the latest answer is applied. */
+	private settingsQueue: Promise<void> = Promise.resolve();
+	private settingsWrite = 0;
 	private toastTimer: ReturnType<typeof setInterval> | null = null;
 
 	readonly isDemo: boolean;
@@ -330,6 +335,8 @@ export class AppState {
 
 	/** Runs `action` once a modified editor has been saved or discarded. */
 	async requestLeave(action: () => void | Promise<void>) {
+		// Nothing replaces the editor while its save is in flight (Lock still does).
+		if (this.savingEntry) return;
 		if (this.editor && this.editorDirty) {
 			this.confirm = { kind: "leave", action };
 			return;
@@ -488,7 +495,7 @@ export class AppState {
 	}
 
 	updateDraft(patch: Partial<EntryDraft>) {
-		if (!this.editor) return;
+		if (!this.editor || this.savingEntry) return;
 		this.editor = { ...this.editor, draft: { ...this.editor.draft, ...patch } };
 	}
 
@@ -500,7 +507,16 @@ export class AppState {
 
 	async saveEditor(): Promise<boolean> {
 		const editor = this.editor;
-		if (!editor || !editor.draft.title.trim()) return false;
+		if (!editor || !editor.draft.title.trim() || this.savingEntry) return false;
+		this.savingEntry = true;
+		try {
+			return await this.saveEditorOnce(editor);
+		} finally {
+			this.savingEntry = false;
+		}
+	}
+
+	private async saveEditorOnce(editor: EditorState): Promise<boolean> {
 		const session = this.session;
 		const selection = this.selection;
 		let id: EntryId;
@@ -670,14 +686,24 @@ export class AppState {
 	// ---------------------------------------------------------------- app settings
 
 	async updateSettings(patch: Partial<Settings>) {
-		// Plain data: $state proxies cannot cross IPC or structuredClone.
-		const next = $state.snapshot({ ...this.settings, ...patch }) as Settings;
-		this.settings = next;
-		try {
-			this.settings = await this.api.app.updateSettings(next);
-		} catch {
-			this.settings = await this.api.app.getSettings();
-		}
+		// Optimistic: the UI shows the change at once, then the writes go out
+		// in order, each carrying the latest desired settings.
+		this.settings = { ...this.settings, ...patch };
+		const write = ++this.settingsWrite;
+		const run = this.settingsQueue.then(async () => {
+			// Plain data: $state proxies cannot cross IPC or structuredClone.
+			const desired = $state.snapshot(this.settings) as Settings;
+			let saved: Settings;
+			try {
+				saved = await this.api.app.updateSettings(desired);
+			} catch {
+				saved = await this.api.app.getSettings();
+			}
+			// A newer edit is queued: its own answer will settle the state.
+			if (write === this.settingsWrite) this.settings = saved;
+		});
+		this.settingsQueue = run.catch(() => {});
+		await run;
 		// New generator defaults apply to the generator straight away.
 		if (patch.generator) this.generator = generatorFromSettings(this.settings);
 	}

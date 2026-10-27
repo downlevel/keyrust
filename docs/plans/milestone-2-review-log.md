@@ -56,3 +56,20 @@
   - **M2-I08** Delete / Ctrl+B / Ctrl+U agivano con testo selezionato → stessa guardia di `handleCopy` per tutti i
     comandi `outsideText`.
 - CI su c043757 (hash router): run 40581659418 success su tutti i job.
+
+## Inspection 2 — Codex codex-cli 0.164.0 (sessione nuova 01a17f28-a25f-7850-930b-277481fd8eae) — REVISE, 4 medium + 1 low
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m2i2/claudex-ktb9r0rh/result.json` (snapshot 5ffa728). CI su 5ffa728: run 40582782254 success.
+- Tutti **ACCETTATI** (secondo e ultimo round di correzioni); i test nuovi falliscono sul codice di 5ffa728 (4 falliti) e
+  passano dopo le correzioni (135/135):
+  - **M2-R201 / M2-R202** salvataggi dell'editor concorrenti, modifiche e navigazione durante un salvataggio →
+    un solo salvataggio alla volta (`savingEntry`): form disabilitato, `updateDraft` e `requestLeave` ignorati
+    finché il salvataggio non termina (Lock resta immediato).
+  - **M2-R203** scritture delle impostazioni fuori ordine → coda seriale; ogni scrittura invia lo stato desiderato più
+    recente e solo l'ultima risposta viene applicata.
+  - **M2-R204** dopo lo sblocco la lista non era raggiungibile con Tab → la prima voce è il tab stop quando nessuna voce
+    visibile è selezionata.
+  - **M2-R205 (low)** etichette "Close" e default inglesi nei componenti vendorizzati → spostate in `en.json`; rimosso
+    `command-dialog.svelte` (non usato); il controllo "untranslated text" ora copre anche `components/ui` e i
+    default delle prop.
+- **Budget di ispezione esaurito** (MAX_INSPECTION_ROUNDS=2): le correzioni di questo round non sono state ispezionate
+  da Codex. Lo si segnala all'utente, che decide se chiedere un'ulteriore ispezione prima del merge.

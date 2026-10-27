@@ -1,4 +1,3 @@
-import Dialog from "./command-dialog.svelte";
 import Empty from "./command-empty.svelte";
 import Group from "./command-group.svelte";
 import Input from "./command-input.svelte";
@@ -12,7 +11,6 @@ import Root from "./command.svelte";
 
 export {
 	Root,
-	Dialog,
 	Empty,
 	Group,
 	Item,
@@ -24,7 +22,6 @@ export {
 	Loading,
 	//
 	Root as Command,
-	Dialog as CommandDialog,
 	Empty as CommandEmpty,
 	Group as CommandGroup,
 	Item as CommandItem,

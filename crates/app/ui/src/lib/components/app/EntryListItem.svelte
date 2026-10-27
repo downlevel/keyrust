@@ -5,12 +5,15 @@
 	let {
 		entry,
 		selected,
+		tabbable = selected,
 		onselect,
 		onopen,
 		onkeydown,
 	}: {
 		entry: EntrySummary;
 		selected: boolean;
+		/** In the tab order (the list's single tab stop). */
+		tabbable?: boolean;
 		onselect: () => void;
 		onopen: () => void;
 		onkeydown: (event: KeyboardEvent) => void;
@@ -23,7 +26,7 @@
 	type="button"
 	role="option"
 	aria-selected={selected}
-	tabindex={selected ? 0 : -1}
+	tabindex={tabbable ? 0 : -1}
 	data-entry-id={entry.id}
 	class="relative flex h-[52px] w-full items-center gap-3 rounded-lg px-2.5 text-left {selected
 		? 'bg-selection'

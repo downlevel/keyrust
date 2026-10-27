@@ -53,6 +53,10 @@ describe("unlock", () => {
 		expect(screen.getByText("Select an entry to see its details.")).toBeInTheDocument();
 		expect(document.querySelector('[aria-live="polite"]')).not.toBeNull();
 		expect(screen.getAllByTestId("demo-badge").length).toBeGreaterThan(0);
+		// With nothing selected the first entry is the list's tab stop (M2-R204).
+		const options = screen.getAllByRole("option");
+		expect(options[0]).toHaveAttribute("tabindex", "0");
+		expect(options.slice(1).every((o) => o.getAttribute("tabindex") === "-1")).toBe(true);
 	});
 });
 
