@@ -17,3 +17,23 @@
 - Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m2r1/claudex-xwvsz758/result.json`
 - Limiti dichiarati: approvazione del piano, non dell'implementazione; prototipo esterno, anteprima web, CI e comportamento
   nativo dei menu non verificati dal reviewer.
+
+## Build (host Claude)
+- Commit 81d71d6 (implementazione) — CI run 40580583112 **success** su tutti gli 8 job al primo tentativo
+  (incluso `cargo clippy --workspace` e `cargo test -p keyrust-app` con i test di `menu.rs` e `security_config.rs`).
+- Verifiche locali: svelte-check 0 errori/0 warning, ESLint e Prettier puliti, Vitest 74/74 (flussi UI, stato con
+  promesse differite, guardia dell'editor, registro comandi, controlli statici di sicurezza), build senza risorse remote.
+- Anteprima web (build di produzione su dati demo): https://claude.ai/artifact/Ag3YbVLHrPxb9whfu2K7wN. Solo nella
+  copia pubblicata `_app` è rinominata `app` (nomi con `_` riservati dal servizio), gli import iniziali sono resi
+  relativi e un carattere U+FFFD letterale di un polyfill `CSS.escape` è scritto come `�`.
+- Deviazioni dal piano:
+  - router SvelteKit in modalità hash (rimosso `+layout.ts` con `ssr = false`, che in modalità hash è implicito):
+    serve all'anteprima web e non cambia nulla in Tauri (un solo route);
+  - acceleratori nativi aggiunti oltre a quelli elencati: `CmdOrCtrl+Q` (Quit) e `CmdOrCtrl+Comma` (Settings), che
+    non interferiscono con la modifica del testo (test dedicati in TS e Rust);
+  - nuovo comando IPC `exit_app` per Quit dopo la guardia delle modifiche; `COMMANDS` e `security_config.rs` aggiornati;
+  - componenti shadcn aggiunti e poi rimossi perché non usati (badge, checkbox, collapsible, kbd, label, scroll-area,
+    select, separator, slider, tabs, tooltip): i controlli nativi (`input type=range`, `checkbox`, `select`) bastano
+    e sono più semplici da testare;
+  - il link URL della voce in Tauri non apre ancora il browser di sistema (serve `tauri-plugin-opener`, Milestone 3);
+    nella demo il clic è ignorato.

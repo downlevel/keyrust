@@ -12,6 +12,9 @@ const config = {
 		adapter: adapter({
 			fallback: "index.html",
 		}),
+		// The app has a single route and keeps its screen in state; hash routing
+		// makes it independent of the page URL (Tauri and the web preview alike).
+		router: { type: "hash" },
 	},
 };
 
