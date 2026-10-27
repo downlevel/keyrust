@@ -39,7 +39,12 @@ These are design goals; most of them are implemented in Milestone 3 (see [docs/T
 - **Secrets lingering in memory or leaking to logs**: secret values are held in `zeroize`/`secrecy`
   types and wiped when dropped; they are never logged, never written to disk in clear text, and the
   webview only receives secrets the user explicitly asks to reveal.
-- **Data loss on save**: saves are atomic (write to a temporary file, then rename).
+- **Data loss on save**: saves are atomic (temporary file in the same folder, fsync, rename). Before
+  replacing the file Keyrust checks, twice, that it still holds exactly the bytes it last read or wrote
+  (length and SHA-256); if another program changed it, the save is refused and you choose between
+  *Reload* and *Keep mine*. Keyrust instances on the same computer also coordinate through a lock.
+- **Resurrected deletions**: permanently deleted entries and groups are recorded as KDBX tombstones,
+  so merging in another KeePass client does not bring them back.
 - **Supply-chain and memory-safety bugs**, as far as practical: Rust with `unsafe_code` forbidden in
   our crates, no hand-written cryptography, pinned and audited dependencies (`cargo deny`), fuzzing
   of the parsing path.
@@ -56,7 +61,10 @@ These are design goals; most of them are implemented in Milestone 3 (see [docs/T
 - **Clipboard managers and history**: Keyrust asks the platform to exclude copied secrets from clipboard
   history where supported, but cannot control third-party clipboard tools.
 - **Sync conflicts and malicious sync providers**: a provider cannot read the file, but it can delete it
-  or roll it back to an older version. Keep backups.
+  or roll it back to an older version. Keep backups. A program that does not use Keyrust's lock
+  (another KeePass client, a sync tool) can still write in the instant between Keyrust's last check and
+  its rename; that window cannot be closed without operating-system support. Keyrust does not merge
+  concurrent changes.
 - **Side channels and a compromised build or update channel.** Releases will be signed; verify signatures.
 
 ## Security design rules

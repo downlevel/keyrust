@@ -117,9 +117,30 @@ pub struct GeneratorOptions { length: u8, lower: bool, upper: bool, digits: bool
 per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previsto da KDBX4.
 
 ## Flussi chiave lato backend
-- **Salvataggio atomico**: serializza in `<file>.tmp` nella stessa directory → `fsync` → `rename` sul file originale.
-  Prima di salvare confronta mtime/hash con quelli all'apertura; se il file è cambiato esternamente, avvisa
-  (strategia definitiva in "Domande aperte").
+- **Salvataggio atomico** (`crates/core/src/file.rs`):
+  - lock advisory tra istanze di Keyrust: `.<nome>.keyrust-lock` accanto al database (permessi 0600, lasciato sul
+    posto perché rimuoverlo creerebbe una race);
+  - confronto dello stampo (lunghezza + SHA-256 dei byte letti o scritti l'ultima volta);
+  - serializzazione in un file temporaneo esclusivo nella stessa directory → `fsync`;
+  - il file temporaneo nasce con permessi 0600 e prende quelli del file originale (un vault 0600 resta 0600);
+  - **secondo confronto** subito prima del `rename` → `fsync` della directory (Unix). Se questo `fsync` fallisce il
+    file è già stato sostituito: lo stato del vault segue il file e l'errore è `NotDurable`.
+  - Se lo stampo non corrisponde il salvataggio è rifiutato (`ExternalChange`) e l'utente sceglie *Reload*
+    (`Vault::reload`, con le credenziali confermate) o *Keep mine* (`save_overwrite`). Niente merge in V1.
+  - Rischio residuo: uno scrittore che non usa il lock può scrivere tra l'ultimo confronto e il `rename`.
+- **Vault** (`crates/core/src/vault.rs`): avvolge `keepass::Database` e lavora sul suo modello, così tutto ciò che
+  Keyrust non mostra resta intatto.
+  - La cronologia è gestita da Keyrust: la versione precedente viene aggiunta in fondo (dalla più vecchia alla più
+    recente, come KeePass) entro `history_max_items`/`history_max_size`.
+  - Le eliminazioni definitive scrivono tombstone in `DeletedObjects`.
+  - I file KDBX 3.1 e 4.0 vengono salvati come KDBX 4.1 (keepass-rs scrive solo 4.1).
+  - Un database AES-KDF o Argon2d mantiene la sua KDF finché l'utente non sceglie Argon2id.
+  - Il vault lavora sul percorso reale del file (i link simbolici vengono risolti all'apertura), così il salvataggio
+    aggiorna il file di destinazione e non sostituisce il link.
+  - I parametri Argon2id sono validati per intero (`kdf::validate`: limiti di keepass-rs e di Argon2, almeno 8 KiB per
+    lane) prima di toccare il vault.
+  - Il `Debug` di tutte le viste (`EntrySummary`, `EntryDetail`, `GroupNode`, `DatabaseInfo`, `EntryDraft`, `Vault`)
+    mostra solo identificatori e conteggi.
 - **Auto-clear clipboard**: dopo la copia parte un timer; alla scadenza svuota gli appunti **solo se** contengono
   ancora il valore copiato (confronto su hash, così non cancella ciò che l'utente ha copiato dopo).
   Hint di esclusione dalla cronologia (KDE/Windows) dove `arboard` lo supporta. Svuotamento anche al lock e all'uscita.
@@ -160,6 +181,6 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
   preservazione lossless di campi custom/allegati/cronologia; se insufficiente, contribuire upstream (bonus da portfolio).
 - **Firma codice Windows/macOS**: acquistare certificati (Apple Developer, Authenticode) o pubblicare in V1 solo
   artefatti firmati con minisign/cosign + checksum? DA DEFINIRE.
-- **Conflitti di sync**: solo rilevamento + avviso in V1, oppure merge in stile KeePassXC? DA DEFINIRE.
 - ~~Libreria i18n~~: decisa in Milestone 1, Paraglide JS 2.
+- ~~Conflitti di sync~~: decisa in Milestone 3, rilevamento e avviso (Reload / Keep mine), niente merge in V1.
 - ~~Package manager frontend~~: pnpm.

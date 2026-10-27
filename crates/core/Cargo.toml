@@ -11,16 +11,25 @@ publish = false
 
 [dependencies]
 keepass = { version = "=0.17.0", features = ["save_kdbx4"] }
+# The Argon2 implementation keepass-rs uses, for KDF calibration.
+argon2 = { package = "rust-argon2", version = "3.0" }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+getrandom = "0.3"
+secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
 tracing = "0.1"
+uuid = { version = "1", features = ["serde"] }
+zeroize = "1"
+zxcvbn = "3"
 
 [dev-dependencies]
-argon2 = { package = "rust-argon2", version = "3.0" }
 roxmltree = "0.20"
 tempfile = "3"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
-chrono = { version = "0.4", default-features = false }
+uuid = "1"
 
 [lints]
 workspace = true

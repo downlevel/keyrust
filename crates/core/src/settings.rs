@@ -5,10 +5,9 @@
 //! corrupt file yields defaults) and saving is atomic, so a crash never leaves
 //! a half-written file behind.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -169,7 +168,7 @@ pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     let json =
         serde_json::to_vec_pretty(&settings.clone().normalized()).map_err(io::Error::other)?;
 
-    let (tmp, mut file) = create_unique_tmp(path)?;
+    let (tmp, mut file) = crate::file::create_unique_tmp(path)?;
     let result = (|| {
         file.write_all(&json)?;
         file.sync_all()?;
@@ -185,26 +184,6 @@ pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     }
     tracing::debug!(path = %path.display(), "settings file");
     result
-}
-
-/// Creates `<name>.<pid>-<n>.tmp` next to `path`, failing rather than reusing
-/// a file that already exists.
-fn create_unique_tmp(path: &Path) -> io::Result<(PathBuf, fs::File)> {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let name = path
-        .file_name()
-        .unwrap_or(FILE_NAME.as_ref())
-        .to_string_lossy();
-    loop {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
-        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
-            Ok(file) => return Ok((tmp, file)),
-            // Left over by a crashed process that had the same id.
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        }
-    }
 }
 
 #[cfg(test)]
