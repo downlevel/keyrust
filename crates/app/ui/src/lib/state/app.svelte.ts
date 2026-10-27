@@ -99,6 +99,8 @@ export class AppState {
 	/** The save in flight, if any: leaving waits for it. */
 	private saving: Promise<boolean> | null = null;
 	/** Vault changes in flight (mutation, refresh, save): leaving waits for them. */
+	// Bookkeeping only, never rendered: deliberately not reactive.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	private pending = new Set<Promise<unknown>>();
 	/** Why the last save failed, if it did. */
 	lastSaveError: VaultErrorKind | null = null;
