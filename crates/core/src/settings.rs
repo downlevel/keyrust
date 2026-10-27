@@ -5,11 +5,12 @@
 //! corrupt file yields defaults) and saving is atomic, so a crash never leaves
 //! a half-written file behind.
 
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub const FILE_NAME: &str = "settings.json";
 pub const CURRENT_VERSION: u32 = 1;
@@ -22,10 +23,13 @@ pub const PASSWORD_LENGTH: std::ops::RangeInclusive<u32> = 8..=128;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(deserialize_with = "saturating_u32")]
     pub version: u32,
     /// Most recent first, without duplicates.
     pub recent_files: Vec<PathBuf>,
+    #[serde(deserialize_with = "saturating_u32")]
     pub clipboard_clear_secs: u32,
+    #[serde(deserialize_with = "saturating_u32")]
     pub idle_lock_mins: u32,
     pub lock_on_screen_lock: bool,
     pub lock_on_minimize: bool,
@@ -35,6 +39,7 @@ pub struct Settings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneratorDefaults {
+    #[serde(deserialize_with = "saturating_u32")]
     pub length: u32,
     pub lowercase: bool,
     pub uppercase: bool,
@@ -103,6 +108,21 @@ fn clamp(value: u32, range: &std::ops::RangeInclusive<u32>) -> u32 {
     value.clamp(*range.start(), *range.end())
 }
 
+/// Reads any JSON number into a `u32`, saturating (negative → 0, too large →
+/// `u32::MAX`, fractions truncated), so that an out-of-range value is clamped
+/// by [`Settings::normalized`] instead of making the whole file invalid.
+fn saturating_u32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let n = serde_json::Number::deserialize(deserializer)?;
+    Ok(if let Some(v) = n.as_u64() {
+        u32::try_from(v).unwrap_or(u32::MAX)
+    } else if n.as_i64().is_some() {
+        0 // a negative integer
+    } else {
+        // `as` saturates and maps NaN to 0.
+        n.as_f64().map_or(0, |v| v as u32)
+    })
+}
+
 /// Loads settings, falling back to defaults instead of failing.
 ///
 /// A file that cannot be parsed is renamed to `<name>.corrupt` (so the user
@@ -136,6 +156,10 @@ pub fn load(path: &Path) -> Settings {
 
 /// Saves settings atomically: write a temporary file next to the target,
 /// flush it to disk, then rename it over the target.
+///
+/// The temporary file is created exclusively under a name unique to this save
+/// (process id and counter), so concurrent saves — even from two app
+/// processes — never write into the same file; the last rename wins whole.
 pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     let dir = path
         .parent()
@@ -145,11 +169,11 @@ pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     let json =
         serde_json::to_vec_pretty(&settings.clone().normalized()).map_err(io::Error::other)?;
 
-    let tmp = path.with_extension("json.tmp");
+    let (tmp, mut file) = create_unique_tmp(path)?;
     let result = (|| {
-        let mut file = File::create(&tmp)?;
         file.write_all(&json)?;
         file.sync_all()?;
+        drop(file);
         fs::rename(&tmp, path)
     })();
     if result.is_err() {
@@ -161,6 +185,26 @@ pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     }
     tracing::debug!(path = %path.display(), "settings file");
     result
+}
+
+/// Creates `<name>.<pid>-<n>.tmp` next to `path`, failing rather than reusing
+/// a file that already exists.
+fn create_unique_tmp(path: &Path) -> io::Result<(PathBuf, fs::File)> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let name = path
+        .file_name()
+        .unwrap_or(FILE_NAME.as_ref())
+        .to_string_lossy();
+    loop {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
+        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(file) => return Ok((tmp, file)),
+            // Left over by a crashed process that had the same id.
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -232,6 +276,56 @@ mod tests {
         );
         // Fields absent from the file take their defaults.
         assert!(s.lock_on_screen_lock);
+    }
+
+    #[test]
+    fn negative_and_oversized_numbers_are_clamped_without_losing_other_settings() {
+        let (_dir, path) = temp();
+        fs::create_dir_all(path.parent().expect("dir")).expect("mkdir");
+        fs::write(
+            &path,
+            br#"{"clipboard_clear_secs": -1, "idle_lock_mins": 99999999999999999999999,
+                "lock_on_minimize": true, "generator": {"length": 12.7}}"#,
+        )
+        .expect("write");
+        let s = load(&path);
+        assert_eq!(s.clipboard_clear_secs, 5);
+        assert_eq!(s.idle_lock_mins, 240);
+        assert_eq!(s.generator.length, 12);
+        assert!(s.lock_on_minimize, "unrelated settings are kept");
+        assert!(path.exists(), "the file is not treated as corrupt");
+    }
+
+    #[test]
+    fn concurrent_saves_never_mix_contents() {
+        let (_dir, path) = temp();
+        let variants: Vec<Settings> = (0..8)
+            .map(|i| Settings {
+                clipboard_clear_secs: 10 + i,
+                recent_files: (0..10)
+                    .map(|n| format!("/vaults/{i}-{n}.kdbx").into())
+                    .collect(),
+                ..Settings::default()
+            })
+            .collect();
+        std::thread::scope(|scope| {
+            for settings in &variants {
+                let path = &path;
+                scope.spawn(move || {
+                    for _ in 0..20 {
+                        save(path, settings).expect("save");
+                    }
+                });
+            }
+        });
+        let raw = fs::read(&path).expect("read");
+        let saved: Settings = serde_json::from_slice(&raw).expect("whole JSON");
+        assert!(variants.contains(&saved), "the file is one of the saves");
+        let names: Vec<_> = fs::read_dir(path.parent().expect("dir"))
+            .expect("read dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, [FILE_NAME], "no temporary file is left behind");
     }
 
     #[test]

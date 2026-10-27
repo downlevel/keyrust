@@ -188,7 +188,9 @@ pub fn peek(data: &[u8]) -> Result<HeaderSummary, HeaderError> {
             other => other?,
         };
         match id {
-            FIELD_END => break,
+            // KeePassXC ends the header with "\r\n\r\n", keepass-rs with nothing.
+            FIELD_END if value.is_empty() || value == b"\r\n\r\n" => break,
+            FIELD_END => return Err(HeaderError::InvalidField("end of header")),
             FIELD_CIPHER_ID => {
                 let id: [u8; 16] = value
                     .try_into()
@@ -225,8 +227,8 @@ pub fn peek(data: &[u8]) -> Result<HeaderSummary, HeaderError> {
     })
 }
 
-/// Value of a KeePass `VariantDictionary` item, limited to the types the KDF
-/// parameters use.
+/// Value of a KeePass `VariantDictionary` item. Every type of the format is
+/// validated (width, UTF-8, boolean value); the KDF only uses some of them.
 enum Variant<'a> {
     U32(u32),
     U64(u64),
@@ -237,6 +239,10 @@ enum Variant<'a> {
 const VARIANT_END: u8 = 0x00;
 const VARIANT_U32: u8 = 0x04;
 const VARIANT_U64: u8 = 0x05;
+const VARIANT_BOOL: u8 = 0x08;
+const VARIANT_I32: u8 = 0x0C;
+const VARIANT_I64: u8 = 0x0D;
+const VARIANT_STRING: u8 = 0x18;
 const VARIANT_BYTES: u8 = 0x42;
 
 fn parse_kdf(data: &[u8]) -> Result<Kdf, HeaderError> {
@@ -252,6 +258,10 @@ fn parse_kdf(data: &[u8]) -> Result<Kdf, HeaderError> {
     loop {
         let kind = r.u8().map_err(|_| HeaderError::InvalidField(FIELD))?;
         if kind == VARIANT_END {
+            // The dictionary must fill the field exactly.
+            if !r.data.is_empty() {
+                return Err(HeaderError::InvalidField(FIELD));
+            }
             break;
         }
         let name = r.sized().map_err(|_| HeaderError::InvalidField(FIELD))?;
@@ -266,7 +276,11 @@ fn parse_kdf(data: &[u8]) -> Result<Kdf, HeaderError> {
                     .map_err(|_| HeaderError::InvalidField(FIELD))?,
             )),
             VARIANT_BYTES => Variant::Bytes(raw),
-            _ => Variant::Other,
+            VARIANT_BOOL if raw == [0] || raw == [1] => Variant::Other,
+            VARIANT_I32 if raw.len() == 4 => Variant::Other,
+            VARIANT_I64 if raw.len() == 8 => Variant::Other,
+            VARIANT_STRING if std::str::from_utf8(raw).is_ok() => Variant::Other,
+            _ => return Err(HeaderError::InvalidField(FIELD)),
         };
         match (name, value) {
             (b"$UUID", Variant::Bytes(b)) => {
@@ -433,6 +447,76 @@ mod tests {
             (FIELD_END, vec![]),
         ]);
         assert_eq!(peek(&data), Err(HeaderError::InvalidField("kdf")));
+    }
+
+    #[test]
+    fn rejects_malformed_structures() {
+        let with = |end: Vec<u8>, params: Vec<u8>| {
+            header(&[
+                (FIELD_CIPHER_ID, CIPHER_AES256.to_vec()),
+                (FIELD_COMPRESSION, 0u32.to_le_bytes().to_vec()),
+                (FIELD_KDF_PARAMETERS, params),
+                (FIELD_END, end),
+            ])
+        };
+        // Both terminators in use are accepted: KeePassXC's and keepass-rs's.
+        assert!(peek(&with(b"\r\n\r\n".to_vec(), argon2id_params())).is_ok());
+        assert!(peek(&with(vec![], argon2id_params())).is_ok());
+        assert_eq!(
+            peek(&with(b"junk".to_vec(), argon2id_params())),
+            Err(HeaderError::InvalidField("end of header"))
+        );
+
+        // Trailing bytes after the dictionary terminator.
+        let mut trailing = argon2id_params();
+        trailing.extend([0xAA, 0xBB]);
+        assert_eq!(
+            peek(&with(vec![], trailing)),
+            Err(HeaderError::InvalidField("kdf"))
+        );
+
+        // Ignored keys are still validated: wrong widths, bad booleans,
+        // invalid UTF-8 and unknown types are all rejected.
+        for (kind, value) in [
+            (VARIANT_I32, vec![]),
+            (VARIANT_I64, vec![1, 2, 3, 4]),
+            (VARIANT_BOOL, vec![2]),
+            (VARIANT_STRING, vec![0xFF, 0xFE]),
+            (VARIANT_U32, vec![1]),
+            (0x77, vec![1]),
+        ] {
+            let mut params = argon2id_params();
+            params.pop(); // VARIANT_END
+            params.push(kind);
+            params.extend(5u32.to_le_bytes());
+            params.extend(b"extra");
+            params.extend((value.len() as u32).to_le_bytes());
+            params.extend(&value);
+            params.push(VARIANT_END);
+            assert_eq!(
+                peek(&with(vec![], params)),
+                Err(HeaderError::InvalidField("kdf")),
+                "type {kind:#04x} with {value:?}"
+            );
+        }
+
+        // Well-formed items of every type are accepted.
+        let mut params = argon2id_params();
+        params.pop();
+        for (kind, value) in [
+            (VARIANT_I32, vec![0; 4]),
+            (VARIANT_I64, vec![0; 8]),
+            (VARIANT_BOOL, vec![1]),
+            (VARIANT_STRING, "ünï".as_bytes().to_vec()),
+        ] {
+            params.push(kind);
+            params.extend(1u32.to_le_bytes());
+            params.push(b'x');
+            params.extend((value.len() as u32).to_le_bytes());
+            params.extend(&value);
+        }
+        params.push(VARIANT_END);
+        assert!(peek(&with(vec![], params)).is_ok());
     }
 
     #[test]

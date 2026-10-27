@@ -49,3 +49,20 @@
   nel file risalvato fa fallire il diff canonico, anche con il controllo delle capacità disabilitato.
 - Deviazione dal piano: per le versioni in cronologia, con KeePassXC recente, il contenuto degli allegati non è più
   verificato da KeePassXC ma da keepass-rs (la CLI non li esporta). Su Linux (2.7.6) la verifica indipendente resta.
+
+## Inspection 1 — Codex codex-cli 0.164.0 (sessione nuova 01a17e44-50ad-75f1-a032-06edeb2fc149) — REVISE
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m1i1/claudex-4vji4_od/result.json`
+- Base d9c532d, plan sha256 47885fde…5841, 44 file ispezionati.
+- **M1-001 (medium) — tmp condiviso tra salvataggi concorrenti** → ACCETTATO. File temporaneo creato con `create_new`
+  e nome unico (`<nome>.<pid>-<contatore>.tmp`); rimosso solo il proprio tmp in caso di errore. Test
+  `concurrent_saves_never_mix_contents` (8 thread × 20 salvataggi: JSON integro, nessun tmp residuo).
+- **M1-002 (medium) — numeri fuori range invalidano tutto il file** → ACCETTATO. Deserializzazione saturante
+  (`saturating_u32`: negativi → 0, oltre u32 → MAX, frazioni troncate) poi clamp in `normalized()`. Test
+  `negative_and_oversized_numbers_are_clamped_without_losing_other_settings`.
+- **M1-003 (medium) — header: terminatore, residui e tipi VariantDictionary non validati** → ACCETTATO con una
+  precisazione: il terminatore vuoto è legittimo (keepass-rs scrive `write_with_len(&[])`, KeePassXC `\r\n\r\n`),
+  quindi sono accettate esattamente queste due forme. Il dizionario deve esaurire il campo; ogni tipo è validato
+  (Bool 0/1, I32 4 byte, I64 8, String UTF-8, U32/U64 a larghezza fissa), tipi sconosciuti rifiutati. Test
+  `rejects_malformed_structures`.
+- Mutation check: rimuovendo ciascuna correzione (saturazione, tmp unico, controllo residui, validazione tipi,
+  terminatore) il test corrispondente fallisce; con le correzioni 15 unit + 11 compat + 2 logging verdi.
