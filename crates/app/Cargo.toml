@@ -26,10 +26,20 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 keyrust-core = { path = "../core" }
 tauri = { version = "2", features = [] }
+# Called from Rust only: no plugin permission is granted to the webview.
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+arboard = { version = "3", features = ["wayland-data-control"] }
+secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+zeroize = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "env-filter", "ansi"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
