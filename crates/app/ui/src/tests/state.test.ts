@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryAppApi, normalizeSettings, DEFAULT_SETTINGS } from "$lib/api/app";
 import { DemoVault } from "$lib/api/demo";
+import { VaultError } from "$lib/api/vault";
 import { AppState } from "$lib/state/app.svelte";
 import type { Settings } from "$lib/api";
 
@@ -499,9 +500,77 @@ describe("unsaved vault changes (milestone 3b)", () => {
 		const { app, vault } = await unlocked();
 		const change = vi.spyOn(vault, "changeMasterPassword");
 		const save = vi.spyOn(vault, "save");
-		expect(await app.changeMasterPassword("brand-new")).toBe(true);
+		expect(await app.changeMasterPassword("brand-new")).toBe("changed");
 		expect(change).toHaveBeenCalledWith("brand-new");
 		expect(save).toHaveBeenCalled();
 		expect(app.vaultDirty).toBe(false);
+	});
+});
+
+describe("3b inspection regressions", () => {
+	it("Quit waits for a change still in flight and sees its failed save (M3B-01)", async () => {
+		const { app, vault } = await unlocked();
+		const exit = vi.spyOn(app.api.app, "exit").mockResolvedValue();
+		const late = deferred<void>();
+		const realCreate = vault.createGroup.bind(vault);
+		vault.createGroup = async (parent, name) => {
+			await late.promise;
+			return realCreate(parent, name);
+		};
+		vault.failNextSave = true;
+		const creating = app.createGroup("Travel");
+		const quitting = app.run("quit");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(exit).not.toHaveBeenCalled();
+		late.resolve();
+		await creating;
+		await quitting;
+		expect(exit).not.toHaveBeenCalled();
+		expect(app.confirm?.kind).toBe("unsaved");
+	});
+
+	it("a failed refresh does not skip the save (M3B-01)", async () => {
+		const { app, vault } = await unlocked();
+		const save = vi.spyOn(vault, "save");
+		const realTree = vault.tree.bind(vault);
+		let failed = false;
+		vault.tree = async () => {
+			if (!failed) {
+				failed = true;
+				throw new VaultError("io");
+			}
+			return realTree();
+		};
+		await app.createGroup("Travel");
+		expect(save).toHaveBeenCalled();
+		expect(app.vaultDirty).toBe(false);
+	});
+
+	it("the backend decides whether anything is unsaved when leaving (M3B-01)", async () => {
+		const { app, vault } = await unlocked();
+		const exit = vi.spyOn(app.api.app, "exit").mockResolvedValue();
+		app.vaultDirty = false;
+		await vault.updateDatabase({ name: "Changed behind the UI's back" });
+		await app.run("quit");
+		expect(app.confirm?.kind).toBe("unsaved");
+		expect(exit).not.toHaveBeenCalled();
+	});
+
+	it("password change outcomes are reported as they are (M3B-03)", async () => {
+		const { app, vault } = await unlocked();
+		expect(await app.changeMasterPassword("one")).toBe("changed");
+
+		vault.failNextSave = true;
+		expect(await app.changeMasterPassword("two")).toBe("pending");
+		const reload = vi.spyOn(vault, "reload");
+		await app.discardUnsaved();
+		expect(reload).toHaveBeenCalled();
+		expect(app.vaultDirty).toBe(false);
+
+		vault.save = () => Promise.reject(new VaultError("notDurable"));
+		expect(await app.changeMasterPassword("three")).toBe("notDurable");
+
+		vault.changeMasterPassword = () => Promise.reject(new VaultError("invalid"));
+		expect(await app.changeMasterPassword("four")).toBe("rejected");
 	});
 });

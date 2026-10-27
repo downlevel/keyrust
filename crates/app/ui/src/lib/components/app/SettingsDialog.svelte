@@ -71,7 +71,7 @@
 	// Change master password dialog.
 	let newPassword = $state("");
 	let confirmPassword = $state("");
-	let passwordFailed = $state(false);
+	let passwordOutcome = $state<"notDurable" | "pending" | "rejected" | null>(null);
 	let changingPassword = $state(false);
 	let newStrength = $state<StrengthEstimate>(estimateStrength(""));
 	let strengthRequest = 0;
@@ -87,7 +87,7 @@
 	function closeMasterPassword() {
 		newPassword = "";
 		confirmPassword = "";
-		passwordFailed = false;
+		passwordOutcome = null;
 		app.openSettings("database");
 	}
 
@@ -96,10 +96,15 @@
 		if (!passwordsMatch || changingPassword) return;
 		const secret = newPassword;
 		changingPassword = true;
-		const ok = await app.changeMasterPassword(secret);
+		const outcome = await app.changeMasterPassword(secret);
 		changingPassword = false;
-		if (ok) closeMasterPassword();
-		else passwordFailed = true;
+		if (outcome === "changed") closeMasterPassword();
+		else passwordOutcome = outcome;
+	}
+
+	async function discardPasswordChange() {
+		await app.discardUnsaved();
+		closeMasterPassword();
 	}
 
 	const input =
@@ -458,18 +463,42 @@
 					<span class="text-xs text-destructive">{m.create_mismatch()}</span>
 				{/if}
 			</div>
-			{#if passwordFailed}
+			{#if passwordOutcome === "rejected"}
 				<p class="text-[13px] text-destructive" role="alert">
 					{m.master_password_failed()}
 				</p>
+			{:else if passwordOutcome === "notDurable"}
+				<p class="text-[13px] text-warning-soft-foreground" role="alert">
+					{m.master_password_not_durable()}
+				</p>
+			{:else if passwordOutcome === "pending"}
+				<p class="text-[13px] text-warning-soft-foreground" role="alert">
+					{m.master_password_pending()}
+				</p>
 			{/if}
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={closeMasterPassword}
-					>{m.master_password_cancel()}</Button
-				>
-				<Button type="submit" disabled={!passwordsMatch || changingPassword}
-					>{m.master_password_save()}</Button
-				>
+				{#if passwordOutcome === "pending"}
+					<Button
+						type="button"
+						variant="outline"
+						onclick={() => void discardPasswordChange()}
+						>{m.master_password_discard()}</Button
+					>
+					<Button type="button" onclick={closeMasterPassword}
+						>{m.master_password_done()}</Button
+					>
+				{:else if passwordOutcome === "notDurable"}
+					<Button type="button" onclick={closeMasterPassword}
+						>{m.master_password_done()}</Button
+					>
+				{:else}
+					<Button type="button" variant="outline" onclick={closeMasterPassword}
+						>{m.master_password_cancel()}</Button
+					>
+					<Button type="submit" disabled={!passwordsMatch || changingPassword}
+						>{m.master_password_save()}</Button
+					>
+				{/if}
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>

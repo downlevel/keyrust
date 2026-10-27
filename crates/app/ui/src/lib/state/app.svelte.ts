@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "$lib/api/app";
 import {
 	VaultError,
+	type VaultErrorKind,
 	type Apis,
 	type AppInfo,
 	type Cipher,
@@ -97,6 +98,10 @@ export class AppState {
 	vaultDirty = $state(false);
 	/** The save in flight, if any: leaving waits for it. */
 	private saving: Promise<boolean> | null = null;
+	/** Vault changes in flight (mutation, refresh, save): leaving waits for them. */
+	private pending = new Set<Promise<unknown>>();
+	/** Why the last save failed, if it did. */
+	lastSaveError: VaultErrorKind | null = null;
 
 	overlay = $state<Overlay>(null);
 	settingsTab = $state<SettingsTab>("general");
@@ -547,10 +552,43 @@ export class AppState {
 		if (!editor || !editor.draft.title.trim() || this.savingEntry) return false;
 		this.savingEntry = true;
 		try {
-			return await this.saveEditorOnce(editor);
+			return await this.track(this.saveEditorOnce(editor));
 		} finally {
 			this.savingEntry = false;
 		}
+	}
+
+	/**
+	 * Registers vault work so that leaving waits for it. The vault counts as
+	 * changed from the start: until the backend says otherwise (a save, or
+	 * `databaseInfo` when leaving), nothing is assumed written.
+	 */
+	private track<T>(work: Promise<T>): Promise<T> {
+		this.vaultDirty = true;
+		this.pending.add(work);
+		void work.then(
+			() => this.pending.delete(work),
+			() => this.pending.delete(work),
+		);
+		return work;
+	}
+
+	/** A change: the backend call, a refresh of the lists, then the save. */
+	private change(op: (session: number) => Promise<unknown>): Promise<boolean> {
+		return this.track(
+			(async () => {
+				const session = this.session;
+				try {
+					await op(session);
+				} catch {
+					return false;
+				}
+				// A failed refresh must not skip the save.
+				await this.refresh(session).catch(() => {});
+				if (session !== this.session) return false;
+				return this.persist();
+			})(),
+		);
 	}
 
 	private async saveEditorOnce(editor: EditorState): Promise<boolean> {
@@ -558,6 +596,7 @@ export class AppState {
 		const selection = this.selection;
 		let id: EntryId;
 		try {
+			this.vaultDirty = true;
 			id = await this.api.vault.saveEntry({
 				...editor.draft,
 				title: editor.draft.title.trim(),
@@ -570,7 +609,7 @@ export class AppState {
 		this.editor = null;
 		this.generated = "";
 		if (this.overlay === "generator") this.overlay = null;
-		await this.refresh(session);
+		await this.refresh(session).catch(() => {});
 		if (session !== this.session) return false;
 		// Show the saved entry unless the user has moved on meanwhile.
 		if (after === this.selection) {
@@ -599,37 +638,33 @@ export class AppState {
 		const c = this.confirm;
 		this.confirm = null;
 		if (!c || c.kind === "leave" || c.kind === "unsaved") return;
-		const session = this.session;
-		if (c.kind === "deleteEntry") {
-			await this.api.vault.deleteEntry(c.id);
-			if (this.selectedId === c.id) this.clearSelection();
-		} else {
-			await this.api.vault.deleteGroup(c.id);
-			if (this.groupId === c.id) this.groupId = ALL;
-		}
-		await this.refresh(session);
-		await this.persist();
+		await this.change(async () => {
+			if (c.kind === "deleteEntry") {
+				await this.api.vault.deleteEntry(c.id);
+				if (this.selectedId === c.id) this.clearSelection();
+			} else {
+				await this.api.vault.deleteGroup(c.id);
+				if (this.groupId === c.id) this.groupId = ALL;
+			}
+		});
 	}
 
 	async restoreSelected() {
 		const id = this.selectedId;
 		if (!id || !this.inRecycleBin) return;
-		const session = this.session;
-		await this.api.vault.restoreEntry(id);
-		await this.refresh(session);
-		await this.persist();
+		await this.change(() => this.api.vault.restoreEntry(id));
 	}
 
 	async createGroup(name: string) {
 		if (!name.trim() || !this.db) return;
-		const session = this.session;
 		const parent =
 			this.groupId === ALL || this.groupId === this.recycleBinId ? this.rootId : this.groupId;
-		const id = await this.api.vault.createGroup(parent, name);
-		await this.refresh(session);
-		if (session !== this.session) return;
-		await this.selectGroup(id);
-		await this.persist();
+		let created: GroupId | null = null;
+		const session = this.session;
+		await this.change(async () => {
+			created = await this.api.vault.createGroup(parent, name);
+		});
+		if (created && session === this.session) await this.selectGroup(created);
 	}
 
 	startRenameGroup(id = this.groupId) {
@@ -641,10 +676,7 @@ export class AppState {
 		this.renamingGroupId = null;
 		const g = this.groups.find((x) => x.id === id);
 		if (!g || !name.trim() || name.trim() === g.name) return;
-		const session = this.session;
-		await this.api.vault.renameGroup(id, name);
-		await this.refresh(session);
-		await this.persist();
+		await this.change(() => this.api.vault.renameGroup(id, name));
 	}
 
 	askDeleteGroup(id = this.groupId) {
@@ -682,6 +714,7 @@ export class AppState {
 	private async write(overwrite: boolean): Promise<boolean> {
 		const session = this.session;
 		this.saveState = "saving";
+		this.lastSaveError = null;
 		try {
 			const info = overwrite
 				? await this.api.vault.saveOverwrite()
@@ -696,6 +729,7 @@ export class AppState {
 			if (session !== this.session) return false;
 			this.saveState = "failed";
 			const kind = e instanceof VaultError ? e.kind : "io";
+			this.lastSaveError = kind;
 			if (kind === "notDurable") {
 				// Written and renamed, but not confirmed on disk: the state
 				// follows the file; the banner offers to write it again.
@@ -750,7 +784,15 @@ export class AppState {
 	 */
 	requestLeaveVault(action: () => void | Promise<void>) {
 		return this.requestLeave(async () => {
-			if (this.saving) await this.saving;
+			// Changes still in flight finish first, then the backend has the
+			// last word on whether anything is unsaved.
+			while (this.pending.size || this.saving) {
+				await Promise.allSettled([...this.pending, this.saving]);
+			}
+			if (this.screen === "vault") {
+				const info = await this.api.vault.databaseInfo().catch(() => null);
+				if (info) this.vaultDirty = info.dirty;
+			}
 			if (this.screen === "vault" && this.vaultDirty) {
 				this.confirm = { kind: "unsaved", action };
 				return;
@@ -772,32 +814,38 @@ export class AppState {
 
 	async updateDatabase(patch: DatabasePatch) {
 		if (!this.db) return;
-		const session = this.session;
-		let info: DatabaseInfo;
-		try {
-			info = await this.api.vault.updateDatabase(patch);
-		} catch {
-			return;
-		}
-		if (session !== this.session) return;
-		this.db = info;
-		this.vaultDirty = true;
-		if (patch.name !== undefined) await this.refresh(session);
-		await this.persist();
+		await this.change(async (session) => {
+			const info = await this.api.vault.updateDatabase(patch);
+			if (session === this.session) this.db = info;
+		});
 	}
 
-	/** New master password: used from the save that follows. */
-	async changeMasterPassword(password: string): Promise<boolean> {
-		if (!this.db || !password) return false;
+	/**
+	 * New master password. The outcome says what the file now uses:
+	 * - "changed": saved with the new password;
+	 * - "notDurable": written with the new password, not confirmed on disk;
+	 * - "pending": not saved; the new password applies at the next successful
+	 *   save, unless the change is discarded (Reload);
+	 * - "rejected": nothing changed, the old password stays.
+	 */
+	async changeMasterPassword(
+		password: string,
+	): Promise<"changed" | "notDurable" | "pending" | "rejected"> {
+		if (!this.db || !password) return "rejected";
 		const session = this.session;
-		try {
+		let accepted = false;
+		const saved = await this.change(async () => {
 			await this.api.vault.changeMasterPassword(password);
-		} catch {
-			return false;
-		}
-		if (session !== this.session) return false;
-		this.vaultDirty = true;
-		return this.persist();
+			accepted = true;
+		});
+		if (!accepted || session !== this.session) return "rejected";
+		if (saved) return "changed";
+		return this.lastSaveError === "notDurable" ? "notDurable" : "pending";
+	}
+
+	/** Drops the unsaved changes, a pending new master password included. */
+	async discardUnsaved() {
+		await this.reloadExternal();
 	}
 
 	async openUrl(url: string) {

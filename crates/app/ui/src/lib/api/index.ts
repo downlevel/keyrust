@@ -17,5 +17,5 @@ export function createApis(): Apis {
 
 export type { AppApi } from "./app";
 export type { VaultApi } from "./vault";
-export { VaultError } from "./vault";
+export { VaultError, type VaultErrorKind } from "./vault";
 export * from "./types";
