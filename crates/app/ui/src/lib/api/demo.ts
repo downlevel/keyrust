@@ -353,7 +353,7 @@ export class DemoVault implements VaultApi {
 		await this.pause();
 		if (this.info) this.info.dirty = true;
 		const e = this.find(id);
-		if (e.groupId === RECYCLE_BIN || !this.open().recycleBin) {
+		if (this.inBin(e.groupId) || !this.open().recycleBin) {
 			this.entries = this.entries.filter((x) => x.id !== id);
 		} else {
 			e.previousGroupId = e.groupId;
@@ -388,24 +388,34 @@ export class DemoVault implements VaultApi {
 		g.name = name.trim();
 	}
 
+	/** Like the core: into the recycle bin whole, or permanently from there. */
 	async deleteGroup(id: GroupId): Promise<void> {
 		await this.pause();
 		if (this.info) this.info.dirty = true;
+		const g = this.groups.find((x) => x.id === id && !x.isRecycleBin);
+		if (!g) throw new VaultError("invalid");
+		if (this.open().recycleBin && !this.inBin(g.id)) {
+			g.parent = RECYCLE_BIN;
+			return;
+		}
 		const doomed = new Set<GroupId>();
 		const collect = (gid: GroupId) => {
 			doomed.add(gid);
-			this.groups.filter((g) => g.parent === gid).forEach((g) => collect(g.id));
+			this.groups.filter((x) => x.parent === gid).forEach((x) => collect(x.id));
 		};
-		const g = this.groups.find((x) => x.id === id && !x.isRecycleBin);
-		if (!g) throw new VaultError("invalid");
 		collect(id);
-		for (const e of this.entries) {
-			if (doomed.has(e.groupId)) {
-				e.previousGroupId = undefined;
-				e.groupId = RECYCLE_BIN;
-			}
-		}
+		this.entries = this.entries.filter((e) => !doomed.has(e.groupId));
 		this.groups = this.groups.filter((x) => !doomed.has(x.id));
+	}
+
+	/** The recycle bin or a group inside it. */
+	private inBin(groupId: GroupId): boolean {
+		let current: GroupId | null = groupId;
+		while (current) {
+			if (current === RECYCLE_BIN) return true;
+			current = this.groups.find((g) => g.id === current)?.parent ?? null;
+		}
+		return false;
 	}
 
 	async updateDatabase(patch: DatabasePatch): Promise<DatabaseInfo> {

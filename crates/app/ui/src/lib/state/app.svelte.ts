@@ -60,6 +60,8 @@ export interface FlatGroup {
 	depth: number;
 	count: number;
 	isRecycleBin: boolean;
+	/** A group deleted into the recycle bin (a descendant of it). */
+	inRecycleBin: boolean;
 }
 
 /**
@@ -144,7 +146,7 @@ export class AppState {
 
 	readonly groups: FlatGroup[] = $derived.by(() => {
 		const out: FlatGroup[] = [];
-		const walk = (node: GroupNode, depth: number) => {
+		const walk = (node: GroupNode, depth: number, recycled: boolean) => {
 			for (const child of node.children) {
 				out.push({
 					id: child.id,
@@ -152,11 +154,12 @@ export class AppState {
 					depth,
 					count: this.entries.filter((e) => e.groupId === child.id).length,
 					isRecycleBin: child.isRecycleBin,
+					inRecycleBin: recycled,
 				});
-				walk(child, depth + 1);
+				walk(child, depth + 1, recycled || child.isRecycleBin);
 			}
 		};
-		if (this.tree) walk(this.tree, 0);
+		if (this.tree) walk(this.tree, 0, false);
 		return out;
 	});
 
@@ -164,15 +167,31 @@ export class AppState {
 	readonly rootId = $derived(this.tree?.id ?? "");
 	readonly recycleBinId = $derived(this.tree?.children.find((c) => c.isRecycleBin)?.id ?? null);
 
-	readonly liveCount = $derived(
-		this.entries.filter((e) => e.groupId !== this.recycleBinId).length,
+	/**
+	 * The recycle bin and every group inside it: deleting a group moves it
+	 * there whole, so its entries stay in their own group.
+	 */
+	readonly recycledGroups: ReadonlySet<GroupId> = $derived(
+		// Rebuilt by the derivation, never mutated: no need for a SvelteSet.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		new Set(this.groups.filter((g) => g.isRecycleBin || g.inRecycleBin).map((g) => g.id)),
 	);
+
+	isRecycled(groupId: GroupId): boolean {
+		return this.recycledGroups.has(groupId);
+	}
+
+	readonly liveCount = $derived(this.entries.filter((e) => !this.isRecycled(e.groupId)).length);
 
 	readonly visibleEntries: EntrySummary[] = $derived.by(() => {
 		const q = this.query.trim().toLowerCase();
 		return this.entries
 			.filter((e) =>
-				this.groupId === ALL ? e.groupId !== this.recycleBinId : e.groupId === this.groupId,
+				this.groupId === ALL
+					? !this.isRecycled(e.groupId)
+					: this.groupId === this.recycleBinId
+						? this.isRecycled(e.groupId)
+						: e.groupId === this.groupId,
 			)
 			.filter((e) => !q || `${e.title} ${e.username} ${e.url}`.toLowerCase().includes(q))
 			.sort((a, b) => a.title.localeCompare(b.title));
@@ -186,7 +205,7 @@ export class AppState {
 		!!this.editor && JSON.stringify(this.editor.draft) !== JSON.stringify(this.editor.original),
 	);
 
-	readonly inRecycleBin = $derived(this.selected?.groupId === this.recycleBinId);
+	readonly inRecycleBin = $derived(!!this.selected && this.isRecycled(this.selected.groupId));
 
 	// ---------------------------------------------------------------- start
 
@@ -503,7 +522,7 @@ export class AppState {
 	// ---------------------------------------------------------------- editor
 
 	private defaultGroup(): GroupId {
-		if (this.groupId !== ALL && this.groupId !== this.recycleBinId) return this.groupId;
+		if (this.groupId !== ALL && !this.isRecycled(this.groupId)) return this.groupId;
 		return this.groups.find((g) => !g.isRecycleBin)?.id ?? this.rootId;
 	}
 
@@ -632,7 +651,7 @@ export class AppState {
 			kind: "deleteEntry",
 			id: e.id,
 			title: e.title,
-			permanent: e.groupId === this.recycleBinId || !this.db?.recycleBin,
+			permanent: this.isRecycled(e.groupId) || !this.db?.recycleBin,
 		};
 	}
 
@@ -660,7 +679,7 @@ export class AppState {
 	async createGroup(name: string) {
 		if (!name.trim() || !this.db) return;
 		const parent =
-			this.groupId === ALL || this.groupId === this.recycleBinId ? this.rootId : this.groupId;
+			this.groupId === ALL || this.isRecycled(this.groupId) ? this.rootId : this.groupId;
 		let created: GroupId | null = null;
 		const session = this.session;
 		await this.change(async () => {
@@ -785,14 +804,18 @@ export class AppState {
 	 * not write are retried or discarded. Lock does not come through here.
 	 */
 	requestLeaveVault(action: () => void | Promise<void>) {
+		const session = this.session;
 		return this.requestLeave(async () => {
 			// Changes still in flight finish first, then the backend has the
 			// last word on whether anything is unsaved.
 			while (this.pending.size || this.saving) {
 				await Promise.allSettled([...this.pending, this.saving]);
+				if (session !== this.session) return;
 			}
 			if (this.screen === "vault") {
 				const info = await this.api.vault.databaseInfo().catch(() => null);
+				// Lock (or another database) meanwhile: this exit is stale.
+				if (session !== this.session) return;
 				if (info) this.vaultDirty = info.dirty;
 			}
 			if (this.screen === "vault" && this.vaultDirty) {
@@ -808,7 +831,9 @@ export class AppState {
 		if (pending?.kind !== "unsaved") return;
 		this.confirm = null;
 		if (choice === "cancel") return;
+		const session = this.session;
 		if (choice === "retry" && !(await this.persist())) return;
+		if (session !== this.session) return;
 		await pending.action();
 	}
 

@@ -322,3 +322,27 @@ describe("database settings (milestone 3b)", () => {
 		await waitFor(() => expect(change).toHaveBeenCalledWith("correct horse"));
 	});
 });
+
+describe("master password fields (M3B-R03)", () => {
+	it("are wiped when Lock closes the dialog", async () => {
+		const { user } = await openVault();
+		await user.keyboard("{Control>}k{/Control}");
+		await user.type(await screen.findByRole("combobox"), "Database Settings");
+		await user.keyboard("{Enter}");
+		await user.click(await screen.findByRole("button", { name: "Change master password…" }));
+		const dialog = await screen.findByRole("dialog", { name: "Change master password" });
+		await user.type(within(dialog).getByLabelText("New master password"), "typed-then-locked");
+		await user.keyboard("{Control>}l{/Control}");
+		// The dialog's closing transition releases the page first.
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+		await unlock(user);
+		await screen.findByRole("listbox", { name: "Entries" });
+		await user.keyboard("{Control>}k{/Control}");
+		await user.type(await screen.findByRole("combobox"), "Database Settings");
+		await user.keyboard("{Enter}");
+		await user.click(await screen.findByRole("button", { name: "Change master password…" }));
+		const again = await screen.findByRole("dialog", { name: "Change master password" });
+		expect(within(again).getByLabelText("New master password")).toHaveValue("");
+	}, 20_000);
+});

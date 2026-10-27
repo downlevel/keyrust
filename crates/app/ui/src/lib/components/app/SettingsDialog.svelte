@@ -84,6 +84,16 @@
 	});
 	const passwordsMatch = $derived(newPassword.length > 0 && newPassword === confirmPassword);
 
+	// The typed passwords live only while the dialog is open: closing it in
+	// any way (Lock included) wipes them.
+	$effect(() => {
+		if (app.overlay !== "masterPassword") {
+			newPassword = "";
+			confirmPassword = "";
+			passwordOutcome = null;
+		}
+	});
+
 	function closeMasterPassword() {
 		newPassword = "";
 		confirmPassword = "";
@@ -98,6 +108,8 @@
 		changingPassword = true;
 		const outcome = await app.changeMasterPassword(secret);
 		changingPassword = false;
+		// Locked or closed meanwhile: nothing to show, nothing to reopen.
+		if (app.overlay !== "masterPassword" || app.screen !== "vault") return;
 		if (outcome === "changed") closeMasterPassword();
 		else passwordOutcome = outcome;
 	}

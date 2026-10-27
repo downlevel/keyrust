@@ -225,6 +225,11 @@ describe("entries, groups and saving", () => {
 		app.askDeleteGroup(travel!.id);
 		await Promise.resolve();
 		await app.confirmDelete();
+		// First into the recycle bin (whole), then permanently.
+		expect(app.groups.find((g) => g.name === "Trips")?.inRecycleBin).toBe(true);
+		app.askDeleteGroup(travel!.id);
+		await Promise.resolve();
+		await app.confirmDelete();
 		expect(app.groups.some((g) => g.name === "Trips")).toBe(false);
 	});
 });
@@ -572,5 +577,67 @@ describe("3b inspection regressions", () => {
 
 		vault.changeMasterPassword = () => Promise.reject(new VaultError("invalid"));
 		expect(await app.changeMasterPassword("four")).toBe("rejected");
+	});
+});
+
+describe("3b second inspection regressions", () => {
+	it("a stale Retry save never closes the next database (M3B-R01)", async () => {
+		const { app, vault } = await unlocked();
+		const exit = vi.spyOn(app.api.app, "exit").mockResolvedValue();
+		vault.failNextSave = true;
+		await app.createGroup("Unsaved");
+		await app.run("quit");
+		expect(app.confirm?.kind).toBe("unsaved");
+		const late = deferred<Awaited<ReturnType<DemoVault["save"]>>>();
+		const info = await vault.databaseInfo();
+		vault.save = () => late.promise;
+		const retry = app.resolveUnsaved("retry");
+		await new Promise((r) => setTimeout(r, 0));
+		app.lock();
+		await app.unlock("secret");
+		late.resolve({ ...info, dirty: false });
+		await retry;
+		expect(exit).not.toHaveBeenCalled();
+		expect(app.screen).toBe("vault");
+	});
+
+	it("entries of a deleted group count as recycled (M3B-R02)", async () => {
+		const { app } = await unlocked();
+		const before = app.liveCount;
+		const banking = app.groups.find((g) => g.name === "Banking");
+		app.askDeleteGroup(banking!.id);
+		await Promise.resolve();
+		await app.confirmDelete();
+		expect(app.liveCount).toBe(before - 2);
+		expect(app.groups.find((g) => g.name === "Banking")?.inRecycleBin).toBe(true);
+		await app.selectGroup(app.recycleBinId!);
+		expect(app.visibleEntries.map((e) => e.title)).toEqual(
+			expect.arrayContaining(["Bank of Example", "Credit Union"]),
+		);
+		await app.selectEntry("bank");
+		expect(app.inRecycleBin).toBe(true);
+		await app.editEntry("bank");
+		expect(app.editor).toBeNull();
+		app.askDeleteEntry("bank");
+		expect(app.confirm).toMatchObject({ kind: "deleteEntry", permanent: true });
+	});
+});
+
+describe("3b second inspection regressions (guard waiting)", () => {
+	it("an exit waiting for a save is dropped if Lock happens meanwhile (M3B-R01)", async () => {
+		const { app, vault } = await unlocked();
+		const exit = vi.spyOn(app.api.app, "exit").mockResolvedValue();
+		const late = deferred<Awaited<ReturnType<DemoVault["save"]>>>();
+		const info = await vault.databaseInfo();
+		vault.save = () => late.promise;
+		void app.persist();
+		const quitting = app.run("quit");
+		await new Promise((r) => setTimeout(r, 0));
+		app.lock();
+		await app.unlock("secret");
+		late.resolve({ ...info, dirty: false });
+		await quitting;
+		expect(exit).not.toHaveBeenCalled();
+		expect(app.screen).toBe("vault");
 	});
 });

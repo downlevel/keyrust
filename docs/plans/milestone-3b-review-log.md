@@ -33,3 +33,20 @@
   - **M3B-03** messaggio sbagliato dopo un cambio password non salvato → esiti espliciti (`changed`, `notDurable`,
     `pending` con "Discard change" che ricarica il file, `rejected`).
 - I 4 test nuovi del frontend falliscono sul codice di 3711836 e passano dopo le correzioni (152/152).
+- CI su 7d75d07 (run 40597683847): clippy del workspace fallito sui 3 OS per `AtomicU32::fetch_update` deprecato nei test
+  di `clipboard.rs` (rinominato `try_update`). Il crate temporaneo usato per la verifica locale non applicava i lint del
+  progetto: da qui in poi la verifica locale del modulo gira con gli stessi lint e `clippy -D warnings`.
+
+## Inspection 2 — Codex codex-cli 0.164.0 (sessione nuova 01a17f8d-e713-7a51-884e-b96373c575e3) — REVISE, 1 high + 2 medium
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3bi2/claudex-wzhq_110/result.json`. Tutti **ACCETTATI** (secondo e ultimo round di correzioni):
+  - **M3B-R01 (high)** la guardia e "Retry save" eseguivano l'azione rimandata anche dopo un Lock → ogni continuazione
+    cattura la sessione e si interrompe dopo ogni attesa se è cambiata. Il primo test scritto passava anche sul codice
+    vecchio (lì il salvataggio rifiutava già la sessione obsoleta); sostituito da un test sull'attesa nella guardia, che
+    fallisce reintroducendo solo il buco e passa con la correzione.
+  - **M3B-R02** le voci di un gruppo eliminato (spostato intero nel cestino dal core) risultavano attive → insieme dei
+    gruppi nel cestino derivato dall'albero, usato per conteggi, filtri, modifica, conferma definitiva, gruppi
+    dell'editor, sidebar e palette; la demo ora elimina i gruppi come il core.
+  - **M3B-R03** le password digitate nel dialog restavano nel componente dopo il Lock → azzerate appena il dialog non è più
+    aperto (qualunque sia il motivo); un completamento dopo il Lock non riapre le impostazioni.
+- Frontend 156/156; clipboard 8/8 con i lint del progetto.
+- **Budget di ispezione esaurito** (MAX_INSPECTION_ROUNDS=2): queste correzioni non sono state ispezionate da Codex.
