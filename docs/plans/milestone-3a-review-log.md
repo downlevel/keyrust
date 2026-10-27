@@ -52,4 +52,5 @@
     `Result`.
   - **M3A-03** il salvataggio attraverso un link simbolico sostituiva il link → il vault risolve il percorso reale
     all'apertura e alla creazione (cartella).
+- CI su 555f9c8: run 40590599780 success su tutti gli 8 job.
 - **Budget di ispezione esaurito** (MAX_INSPECTION_ROUNDS=2): queste correzioni non sono state ispezionate da Codex.
