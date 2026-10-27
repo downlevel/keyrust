@@ -122,7 +122,8 @@ fn assert_rich_capabilities(cli: &Cli, db: &Path, xml: &str) {
             .collect();
         assert_eq!(refs, ["readme.txt"]);
     }
-    // The history attachment shares the pool slot of the current readme.txt.
+    // The history attachment shares the pool slot of the current readme.txt
+    // (trivially true with recent KeePassXC, whose exports write Ref="0" everywhere).
     let readme_ref = |e: roxmltree::Node<'_, '_>| {
         children(e, "Binary")
             .find(|b| text(*b, "Key") == Some("readme.txt"))
@@ -337,11 +338,9 @@ fn t2_round_trip_is_lossless() {
     let original = fixture(RICH);
     let dir = tempfile::tempdir().expect("tempdir");
     let resaved = dir.path().join("resaved.kdbx");
-    save(
-        &open(&original, FIXTURE_PASSWORD),
-        &resaved,
-        FIXTURE_PASSWORD,
-    );
+    let original_db = open(&original, FIXTURE_PASSWORD);
+    save(&original_db, &resaved, FIXTURE_PASSWORD);
+    let resaved_db = open(&resaved, FIXTURE_PASSWORD);
 
     let before = cli.export_xml(&original, FIXTURE_PASSWORD);
     // Exports stamp some values with the current time; make sure the two
@@ -355,11 +354,11 @@ fn t2_round_trip_is_lossless() {
 
     let before_lines = canonical_lines(
         &before,
-        &resolve_refs(&cli, &original, &before, FIXTURE_PASSWORD),
+        &resolve_attachments(&cli, &original, &original_db, &before, FIXTURE_PASSWORD),
     );
     let after_lines = canonical_lines(
         &after,
-        &resolve_refs(&cli, &resaved, &after, FIXTURE_PASSWORD),
+        &resolve_attachments(&cli, &resaved, &resaved_db, &after, FIXTURE_PASSWORD),
     );
     let (lost, added) = diff(&before_lines, &after_lines);
     assert!(

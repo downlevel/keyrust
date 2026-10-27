@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::{NaiveDate, NaiveDateTime, TimeDelta};
+use keepass::Database;
 
 /// Test-only password of the committed fixtures. Not a secret.
 pub const FIXTURE_PASSWORD: &str = "keyrust-test-password";
@@ -277,18 +278,19 @@ pub const EXPORT_TIME_CUSTOM_DATA_KEY: &str = "_LAST_MODIFIED";
 
 /// Flattens an export into sorted `path = value` lines.
 ///
-/// Attachment references (`<Value Ref="n"/>`) are pool indices whose order a
-/// writer may change, so they are replaced by the attachment's content as
-/// resolved through `ref_content` (built from `keepassxc-cli attachment-export`).
-/// An unresolvable reference fails the test rather than being skipped.
-pub fn canonical_lines(xml: &str, ref_content: &BTreeMap<String, Vec<u8>>) -> Vec<String> {
+/// Attachment references (`<Value Ref="n"/>`) are replaced by the attachment's
+/// content, looked up by [`attachment_key`] in `contents` (built by
+/// [`resolve_attachments`]). The `Ref` number itself is not compared: writers
+/// may renumber the pool, and recent KeePassXC exports write `Ref="0"` for
+/// every attachment. A missing attachment fails the test rather than being skipped.
+pub fn canonical_lines(xml: &str, contents: &BTreeMap<AttachmentKey, Vec<u8>>) -> Vec<String> {
     let doc = parse(xml);
     let mut lines = Vec::new();
     walk(
         doc.root_element(),
         "/KeePassFile",
         "/KeePassFile",
-        ref_content,
+        contents,
         &mut lines,
     );
     lines.sort();
@@ -302,7 +304,7 @@ fn walk(
     node: roxmltree::Node<'_, '_>,
     path: &str,
     kind: &str,
-    refs: &BTreeMap<String, Vec<u8>>,
+    contents: &BTreeMap<AttachmentKey, Vec<u8>>,
     lines: &mut Vec<String>,
 ) {
     if NORMALISED.contains(&kind) {
@@ -324,9 +326,11 @@ fn walk(
     }
     for attr in node.attributes() {
         let value = if attr.name() == "Ref" {
-            let content = refs.get(attr.value()).unwrap_or_else(|| {
-                panic!("unresolvable attachment Ref {} at {path}", attr.value())
-            });
+            let binary = node.parent().expect("Binary owning the Ref");
+            let key = attachment_key(binary);
+            let content = contents
+                .get(&key)
+                .unwrap_or_else(|| panic!("unresolved attachment {key:?} at {path}"));
             format!("content:{}", hex(content))
         } else {
             attr.value().to_string()
@@ -337,7 +341,7 @@ fn walk(
         lines.push(format!("{path} = {:?}", node.text().unwrap_or("")));
     }
     for (c, child_path, child_kind) in elements {
-        walk(c, &child_path, &child_kind, refs, lines);
+        walk(c, &child_path, &child_kind, contents, lines);
     }
 }
 
@@ -359,30 +363,111 @@ pub fn diff(a: &[String], b: &[String]) -> (Vec<String>, Vec<String>) {
     (only_a, only_b)
 }
 
-/// Maps every attachment `Ref` used by current entries of an export to the
-/// attachment bytes, as exported by KeePassXC itself.
+/// Identifies an attachment without the export's `Ref` numbering: owning
+/// entry UUID (base64, as exported), history version index (`None` for the
+/// current entry) and attachment name.
+pub type AttachmentKey = (String, Option<usize>, String);
+
+/// [`AttachmentKey`] of a `<Binary>` element of an export.
+pub fn attachment_key(binary: roxmltree::Node<'_, '_>) -> AttachmentKey {
+    let entry = binary.parent().expect("Entry owning the Binary");
+    let uuid = text(entry, "UUID").expect("Entry/UUID").to_string();
+    let name = text(binary, "Key").expect("Binary/Key").to_string();
+    let history = entry
+        .parent()
+        .filter(|p| p.has_tag_name("History"))
+        .map(|h| {
+            children(h, "Entry")
+                .position(|e| e == entry)
+                .expect("history version")
+        });
+    (uuid, history, name)
+}
+
+/// Content of every attachment of an export, keyed by [`AttachmentKey`].
 ///
-/// History versions reference the same pool; a history-only reference stays
-/// unresolved and makes [`canonical_lines`] fail loudly.
-pub fn resolve_refs(cli: &Cli, db: &Path, xml: &str, password: &str) -> BTreeMap<String, Vec<u8>> {
+/// Current entries are read through KeePassXC itself (`attachment-export`).
+/// `keepassxc-cli` cannot export attachments of history versions, so those are
+/// read with keepass-rs from `parsed` (the same file, already opened), and
+/// T1 pins keepass-rs's reading of them on the KeePassXC fixture.
+///
+/// When the export's `Ref`s are real pool indices (KeePassXC 2.7.x), they are
+/// still used as an independent check: every attachment sharing a `Ref` must
+/// have the same content, history versions included. Recent KeePassXC exports
+/// write `Ref="0"` for every attachment, which this check detects and skips.
+pub fn resolve_attachments(
+    cli: &Cli,
+    db: &Path,
+    parsed: &Database,
+    xml: &str,
+    password: &str,
+) -> BTreeMap<AttachmentKey, Vec<u8>> {
     let doc = parse(xml);
-    let mut refs = BTreeMap::new();
-    for entry in doc.descendants().filter(|n| {
-        n.has_tag_name("Entry") && !n.parent().is_some_and(|p| p.has_tag_name("History"))
-    }) {
-        let path = entry_path(entry);
-        for binary in children(entry, "Binary") {
-            let name = text(binary, "Key").expect("Binary/Key");
-            let id = child(binary, "Value")
-                .and_then(|v| v.attribute("Ref"))
-                .expect("Ref");
-            let content = cli.attachment(db, &path, name, password);
-            if let Some(previous) = refs.insert(id.to_string(), content.clone()) {
-                assert_eq!(previous, content, "Ref {id} resolves to different contents");
-            }
+    let mut contents = BTreeMap::new();
+    let mut by_ref: BTreeMap<String, Vec<Vec<u8>>> = BTreeMap::new();
+    for binary in doc.descendants().filter(|n| n.has_tag_name("Binary")) {
+        let key = attachment_key(binary);
+        let (uuid, history, name) = &key;
+        let entry = binary.parent().expect("Entry");
+        let content = match history {
+            None => cli.attachment(db, &entry_path(entry), name, password),
+            Some(index) => keepass_rs_history_attachment(parsed, uuid, *index, name),
+        };
+        let reference = child(binary, "Value")
+            .and_then(|v| v.attribute("Ref"))
+            .expect("Ref");
+        by_ref
+            .entry(reference.to_string())
+            .or_default()
+            .push(content.clone());
+        assert!(
+            contents.insert(key.clone(), content).is_none(),
+            "duplicate attachment {key:?}"
+        );
+    }
+
+    let current: BTreeMap<String, Vec<u8>> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("Binary"))
+        .filter(|b| attachment_key(*b).1.is_none())
+        .map(|b| {
+            let reference = child(b, "Value").and_then(|v| v.attribute("Ref"));
+            (
+                reference.expect("Ref").to_string(),
+                contents[&attachment_key(b)].clone(),
+            )
+        })
+        .collect();
+    let refs_are_pool_indices = by_ref
+        .iter()
+        .filter(|(r, _)| current.contains_key(*r))
+        .all(|(r, all)| all.iter().all(|c| *c == current[r]));
+    if refs_are_pool_indices {
+        for (reference, all) in &by_ref {
+            let expected = current
+                .get(reference)
+                .unwrap_or_else(|| panic!("Ref {reference} used only by history versions"));
+            assert!(
+                all.iter().all(|c| c == expected),
+                "Ref {reference} resolves to different contents"
+            );
         }
     }
-    refs
+    contents
+}
+
+fn keepass_rs_history_attachment(db: &Database, uuid: &str, index: usize, name: &str) -> Vec<u8> {
+    let uuid = base64_decode(uuid);
+    let entry = db
+        .iter_all_entries()
+        .find(|e| e.id().uuid().as_bytes().as_slice() == uuid.as_slice())
+        .expect("entry of the history version");
+    let version = entry.historical(index).expect("history version");
+    version
+        .attachments_named()
+        .find(|(n, _)| *n == name)
+        .map(|(_, a)| a.data.get().clone())
+        .expect("history attachment")
 }
 
 /// `/Group/Sub/Title` path of an entry, as `keepassxc-cli` expects it (the root
