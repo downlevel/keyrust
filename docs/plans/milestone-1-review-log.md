@@ -66,3 +66,19 @@
   `rejects_malformed_structures`.
 - Mutation check: rimuovendo ciascuna correzione (saturazione, tmp unico, controllo residui, validazione tipi,
   terminatore) il test corrispondente fallisce; con le correzioni 15 unit + 11 compat + 2 logging verdi.
+
+## Inspection 2 — Codex codex-cli 0.164.0 (sessione nuova 01a17e47-e1a0-7003-a87e-bcf2c4ddb987) — BLOCKED, 0 findings
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m1i2/claudex-yoqkjkxx/result.json`
+- Snapshot 13a6c72. Nessun difetto materiale dalla revisione statica (correzioni M1-001..003 incluse). Unico motivo del
+  BLOCKED: la sandbox dell'ispettore non risolve `api.github.com`, quindi non ha potuto verificare la CI.
+- Prova CI raccolta dall'host (API pubblica): run 40545267283 su 13a6c72 **success** su tutti gli 8 job (core e app
+  su Linux/Windows/macOS, deny, fuzz), artifact keyrust-{linux,windows,macos}-debug prodotti. I job core Windows/macOS
+  usano KeePassXC recente (export con `Ref="0"`) e confermano la correzione 0ad2c3b.
+- Il runner non consente `--resume` per le ispezioni e il budget (MAX_INSPECTION_ROUNDS=2) è esaurito: **non è
+  un'approvazione formale**. Esito riportato all'utente, che decide il merge.
+
+## Modifiche successive all'ispezione (non ispezionate da Codex)
+- Ottimizzazioni CI richieste dall'utente: installer Tauri solo su PR / push su `main` / run manuali; push di sola
+  documentazione senza CI (`paths-ignore`, solo per `push`); `opt-level=3` in dev limitato ai crate di crittografia,
+  decompressione e XML invece che a tutte le dipendenze (test compat invariati: 4,1 s). Solo configurazione, nessun
+  codice Rust/TS.

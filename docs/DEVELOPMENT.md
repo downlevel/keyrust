@@ -96,7 +96,8 @@ See [fuzz/README.md](../fuzz/README.md) (needs a nightly toolchain).
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and on pull requests to `main`:
+`.github/workflows/ci.yml` runs on every push (except documentation-only changes), on pull requests
+to `main` and manually (*Actions* → *CI* → *Run workflow*):
 
 | Job | What it does |
 |---|---|
@@ -105,7 +106,9 @@ See [fuzz/README.md](../fuzz/README.md) (needs a nightly toolchain).
 | `deny` | `cargo deny check` (licences, advisories, sources) |
 | `fuzz` | every cargo-fuzz target for 60 s |
 
-Each `app` run uploads an **unsigned debug build** as an artifact, kept 7 days:
+The desktop build is the slowest step, so it runs only for pull requests, pushes to `main` and manual
+runs; a plain push to a branch stops after the tests. Those runs upload an **unsigned debug build** as
+an artifact, kept 7 days:
 `keyrust-windows-debug` (NSIS installer), `keyrust-macos-debug` (dmg), `keyrust-linux-debug` (deb).
 Download it from the run page on GitHub (*Actions* → run → *Artifacts*). They are for testing only:
 Windows SmartScreen and macOS Gatekeeper will warn because they are not signed (on macOS:

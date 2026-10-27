@@ -24,9 +24,48 @@ expect_used = "warn"
 dbg_macro = "warn"
 print_stdout = "warn"
 
-# The KDBX key derivation (AES-KDF / Argon2) is unbearably slow unoptimised;
-# optimise dependencies even in dev/test builds.
-[profile.dev.package."*"]
+# The KDBX key derivation (AES-KDF / Argon2), decryption and decompression are
+# unbearably slow unoptimised, so these crates are optimised even in dev/test
+# builds. Only them: optimising every dependency (Tauri, GTK, …) makes each
+# uncached build much slower for no benefit. `keepass` is included because the
+# generic cipher/digest code is instantiated there.
+[profile.dev.package.keepass]
+opt-level = 3
+[profile.dev.package.rust-argon2]
+opt-level = 3
+[profile.dev.package.blake2b_simd]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.cipher]
+opt-level = 3
+[profile.dev.package.cbc]
+opt-level = 3
+[profile.dev.package.block-modes]
+opt-level = 3
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.twofish]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3
+[profile.dev.package.hybrid-array]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.quick-xml]
 opt-level = 3
 
 # Release profile for the desktop app (https://tauri.app/concept/size/).
