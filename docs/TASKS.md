@@ -35,16 +35,16 @@
 
 ## Milestone 3 — Feature core
 ### core (Rust)
-- [ ] `Vault::create` con KDF Argon2id (default 64 MiB / p=2 / iterazioni calibrate ~1 s) e cifratura KDBX4
-- [ ] `Vault::open` da file e da bytes, errori tipizzati (password errata, formato non valido, versione non supportata)
-- [ ] Salvataggio atomico (tmp + fsync + rename) e rilevamento modifiche esterne (mtime/hash)
-- [ ] Segreti con `secrecy`/`zeroize`; `Debug` redatto; test che verificano l'assenza di segreti in log/debug
-- [ ] Modello gruppi: albero, crea / rinomina / sposta / elimina
-- [ ] Voci: CRUD con campi standard, cronologia aggiornata a ogni modifica, preservazione dei campi sconosciuti
-- [ ] Eliminazione tramite cestino KDBX e ripristino
-- [ ] Ricerca su titolo / username / URL / note (esclusa la password), < 50 ms su 5.000 voci
-- [ ] Generatore password con `OsRng` + stima robustezza; test sui vincoli dei set di caratteri
-- [ ] Calibrazione e modifica parametri Argon2id; cambio master password
+- [x] `Vault::create` con KDF Argon2id (default 64 MiB / p=2 / iterazioni calibrate ~1 s) e cifratura KDBX4
+- [x] `Vault::open` da file e da bytes, errori tipizzati (password errata, formato non valido, versione non supportata)
+- [x] Salvataggio atomico (tmp + fsync + rename) e rilevamento modifiche esterne (mtime/hash)
+- [x] Segreti con `secrecy`/`zeroize`; `Debug` redatto; test che verificano l'assenza di segreti in log/debug
+- [x] Modello gruppi: albero, crea / rinomina / sposta / elimina
+- [x] Voci: CRUD con campi standard, cronologia aggiornata a ogni modifica, preservazione dei campi sconosciuti
+- [x] Eliminazione tramite cestino KDBX e ripristino
+- [x] Ricerca su titolo / username / URL / note (esclusa la password), < 50 ms su 5.000 voci
+- [x] Generatore password con il CSPRNG di sistema (`getrandom`) + stima robustezza (zxcvbn); test sui vincoli dei set di caratteri
+- [x] Calibrazione e modifica parametri Argon2id; cambio master password
 
 ### app (Tauri + Svelte)
 - [ ] Comandi IPC: unlock, create, save, lock, list_groups, list_entries (solo `EntrySummary`), get_entry, reveal_field, update_entry, delete, search, generate
@@ -56,9 +56,9 @@
 - [ ] Indicatore "unsaved changes" e salvataggio (Ctrl+S)
 
 ### Compatibilità e sicurezza
-- [ ] Test KeePassXC → Keyrust: apertura di tutte le fixture con verifica del contenuto atteso
-- [ ] Test Keyrust → KeePassXC: DB generati verificati con `keepassxc-cli ls/show/export`
-- [ ] Test round-trip lossless: fixture → salva → export XML con `keepassxc-cli`, nessuna differenza
+- [x] Test KeePassXC → Keyrust: apertura di tutte le fixture con verifica del contenuto atteso
+- [x] Test Keyrust → KeePassXC: DB generati verificati con `keepassxc-cli ls/show/export`
+- [x] Test round-trip lossless: fixture → salva → export XML con `keepassxc-cli`, nessuna differenza
 - [ ] Target fuzz `open_from_bytes` con corpus dalle fixture; run lunga manuale e correzione dei crash
 - [ ] Verifica manuale con KeePassDX (Android) e Strongbox (iOS) su un DB sincronizzato
 

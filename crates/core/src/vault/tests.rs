@@ -1,0 +1,557 @@
+use std::path::PathBuf;
+use std::time::Instant;
+
+use secrecy::{ExposeSecret, SecretString};
+
+use super::*;
+use crate::file::{Phase, hook};
+use crate::model::{Argon2idParams, Cipher, CreateOptions, EntryDraft, Field, KdfInfo};
+
+const PASSWORD: &str = "unit-test-password";
+const FIXTURE_PASSWORD: &str = "keyrust-test-password";
+
+fn secret(s: &str) -> SecretString {
+    SecretString::from(s.to_owned())
+}
+
+fn small_kdf() -> Argon2idParams {
+    Argon2idParams {
+        memory_mib: 8,
+        iterations: 1,
+        parallelism: 1,
+    }
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+}
+
+fn new_vault() -> (Fixture, Vault) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("test.kdbx");
+    let vault = Vault::create(
+        &path,
+        CreateOptions {
+            name: "Test".into(),
+            password: secret(PASSWORD),
+            cipher: Cipher::ChaCha20,
+            kdf: small_kdf(),
+        },
+    )
+    .expect("create");
+    (Fixture { _dir: dir, path }, vault)
+}
+
+fn fixture_copy(name: &str) -> (Fixture, Vault) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join(name);
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures")
+        .join(name);
+    std::fs::copy(source, &path).expect("copy fixture");
+    let vault = Vault::open(&path, secret(FIXTURE_PASSWORD)).expect("open fixture");
+    (Fixture { _dir: dir, path }, vault)
+}
+
+fn draft(vault: &Vault, title: &str, password: &str) -> EntryDraft {
+    EntryDraft {
+        id: None,
+        group_id: vault.tree().id,
+        title: title.into(),
+        username: format!("{title}-user"),
+        password: secret(password),
+        url: format!("https://{title}.example"),
+        notes: format!("notes of {title}"),
+    }
+}
+
+fn reopen(f: &Fixture) -> Vault {
+    Vault::open(&f.path, secret(PASSWORD)).expect("reopen")
+}
+
+fn history_passwords(vault: &Vault, id: EntryId) -> Vec<String> {
+    let e = vault.entry_ref(id).expect("entry");
+    e.history
+        .as_ref()
+        .map(|h| {
+            h.get_entries()
+                .iter()
+                .map(|v| v.get_password().unwrap_or_default().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// ------------------------------------------------------------------ open / create
+
+#[test]
+fn create_writes_a_kdbx4_argon2id_database_that_reopens() {
+    let (f, vault) = new_vault();
+    assert!(!vault.is_dirty());
+    let info = reopen(&f).info();
+    assert_eq!(info.name, "Test");
+    assert_eq!(info.cipher, Cipher::ChaCha20);
+    assert_eq!(info.version.0, 4);
+    assert!(info.recycle_bin);
+    assert_eq!(
+        info.kdf,
+        KdfInfo::Argon2 {
+            variant: crate::model::Argon2Variant::Argon2id,
+            memory_bytes: 8 * 1024 * 1024,
+            iterations: 1,
+            parallelism: 1,
+        }
+    );
+}
+
+#[test]
+fn create_refuses_an_existing_file_and_empty_inputs() {
+    let (f, _vault) = new_vault();
+    let again = Vault::create(
+        &f.path,
+        CreateOptions {
+            name: "Again".into(),
+            password: secret(PASSWORD),
+            cipher: Cipher::Aes256,
+            kdf: small_kdf(),
+        },
+    );
+    assert!(matches!(again, Err(VaultError::AlreadyExists)));
+    let empty = Vault::create(
+        &f.path.with_file_name("other.kdbx"),
+        CreateOptions {
+            name: "Other".into(),
+            password: secret(""),
+            cipher: Cipher::Aes256,
+            kdf: small_kdf(),
+        },
+    );
+    assert!(matches!(empty, Err(VaultError::Invalid(_))));
+}
+
+#[test]
+fn typed_open_errors() {
+    let (f, _vault) = new_vault();
+    assert!(matches!(
+        Vault::open(&f.path, secret("wrong")),
+        Err(VaultError::WrongKey)
+    ));
+    assert!(matches!(
+        Vault::open_bytes(b"definitely not a database", secret(PASSWORD)),
+        Err(VaultError::InvalidFormat)
+    ));
+    let mut future = std::fs::read(&f.path).expect("read");
+    future[8..12].copy_from_slice(&[0, 0, 5, 0]); // minor 0, major 5
+    assert!(matches!(
+        Vault::open_bytes(&future, secret(PASSWORD)),
+        Err(VaultError::UnsupportedVersion { major: 5, minor: 0 })
+    ));
+    assert!(matches!(
+        Vault::open(&f.path.with_file_name("missing.kdbx"), secret(PASSWORD)),
+        Err(VaultError::Io(std::io::ErrorKind::NotFound))
+    ));
+}
+
+#[test]
+fn kdbx31_is_read_and_saved_as_kdbx4() {
+    let (f, mut vault) = fixture_copy("keepassxc-kdbx31.kdbx");
+    assert_eq!(vault.info().version, (3, 1));
+    let legacy = vault.search("legacy");
+    assert_eq!(legacy.len(), 1);
+    vault.save().expect("save");
+    let reopened = Vault::open(&f.path, secret(FIXTURE_PASSWORD)).expect("reopen");
+    assert_eq!(reopened.info().version.0, 4);
+    assert_eq!(
+        reopened
+            .reveal_field(legacy[0], Field::Password)
+            .expect("reveal")
+            .expose_secret(),
+        "legacy-entry-password"
+    );
+}
+
+#[test]
+fn an_aes_kdf_database_keeps_its_kdf_unless_asked() {
+    let (f, mut vault) = fixture_copy("keepassxc-rich.kdbx");
+    let before = vault.info().kdf;
+    assert!(matches!(before, KdfInfo::AesKdf { .. }));
+    vault.rename_database("Renamed").expect("rename");
+    vault.save().expect("save");
+    let reopened = Vault::open(&f.path, secret(FIXTURE_PASSWORD)).expect("reopen");
+    assert_eq!(reopened.info().kdf, before);
+    assert_eq!(reopened.info().name, "Renamed");
+}
+
+// ------------------------------------------------------------------ secrets
+
+#[test]
+fn debug_output_reveals_nothing() {
+    let (_f, mut vault) = new_vault();
+    let d = draft(&vault, "Bank", "s3cret-p4ss");
+    let id = vault.save_entry(&d).expect("save");
+    let shown = format!(
+        "{vault:?} {d:?} {:?}",
+        vault.entry_for_edit(id).expect("draft")
+    );
+    for value in [
+        PASSWORD,
+        "s3cret-p4ss",
+        "Bank-user",
+        "Bank.example",
+        "notes of Bank",
+    ] {
+        assert!(!shown.contains(value), "{value} leaked in {shown}");
+    }
+}
+
+#[test]
+fn passwords_are_stored_protected_and_only_revealed_on_request() {
+    let (f, mut vault) = new_vault();
+    let id = vault
+        .save_entry(&draft(&vault, "Bank", "pw-1"))
+        .expect("save");
+    vault.save().expect("save file");
+    let vault = reopen(&f);
+    let e = vault.entry_ref(id).expect("entry");
+    assert!(e.fields[fields::PASSWORD].is_protected());
+    let detail = vault.get_entry(id).expect("detail");
+    assert!(detail.has_password);
+    assert_eq!(
+        vault
+            .reveal_field(id, Field::Password)
+            .expect("reveal")
+            .expose_secret(),
+        "pw-1"
+    );
+}
+
+// ------------------------------------------------------------------ entries
+
+#[test]
+fn history_is_oldest_first_and_unchanged_saves_add_nothing() {
+    let (f, mut vault) = new_vault();
+    let id = vault
+        .save_entry(&draft(&vault, "Bank", "pw-1"))
+        .expect("create");
+    for pw in ["pw-2", "pw-3"] {
+        let mut d = vault.entry_for_edit(id).expect("draft");
+        d.password = secret(pw);
+        vault.save_entry(&d).expect("update");
+    }
+    let unchanged = vault.entry_for_edit(id).expect("draft");
+    vault.save_entry(&unchanged).expect("no-op");
+    assert_eq!(history_passwords(&vault, id), ["pw-1", "pw-2"]);
+    vault.save().expect("save");
+    assert_eq!(history_passwords(&reopen(&f), id), ["pw-1", "pw-2"]);
+}
+
+#[test]
+fn history_is_trimmed_to_the_default_limit() {
+    let (_f, mut vault) = new_vault();
+    let id = vault
+        .save_entry(&draft(&vault, "Bank", "pw-0"))
+        .expect("create");
+    for n in 1..=12 {
+        let mut d = vault.entry_for_edit(id).expect("draft");
+        d.password = secret(&format!("pw-{n}"));
+        vault.save_entry(&d).expect("update");
+    }
+    let history = history_passwords(&vault, id);
+    assert_eq!(history.len(), DEFAULT_HISTORY_MAX_ITEMS);
+    assert_eq!(history.first().map(String::as_str), Some("pw-2"));
+    assert_eq!(history.last().map(String::as_str), Some("pw-11"));
+}
+
+#[test]
+fn updating_a_fixture_entry_keeps_everything_else() {
+    let (f, mut vault) = fixture_copy("keepassxc-rich.kdbx");
+    let github = vault.search("github")[0];
+    let names = |e: &EntryRef<'_>| {
+        let mut n: Vec<String> = e.attachments_named().map(|(n, _)| n.to_owned()).collect();
+        n.sort();
+        n
+    };
+    let (before, before_attachments) = {
+        let e = vault.entry_ref(github).expect("entry");
+        ((*e).clone(), names(&e))
+    };
+    let mut d = vault.entry_for_edit(github).expect("draft");
+    d.username = "someone-else".into();
+    vault.save_entry(&d).expect("update");
+    vault.save().expect("save");
+
+    let vault = Vault::open(&f.path, secret(FIXTURE_PASSWORD)).expect("reopen");
+    let after = vault.entry_ref(github).expect("entry");
+    assert_eq!(after.get_username(), Some("someone-else"));
+    assert_eq!(after.get("Recovery code"), before.get("Recovery code"));
+    assert!(after.fields["Recovery code"].is_protected());
+    assert_eq!(after.get("Environment"), before.get("Environment"));
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.custom_data, before.custom_data);
+    assert_eq!(after.autotype, before.autotype);
+    assert_eq!(names(&after), before_attachments);
+    assert_eq!(after.times.creation, before.times.creation);
+    // KeePassXC's two versions stay first; the version just replaced is appended.
+    let previous = before.get_password().unwrap_or_default().to_owned();
+    assert_eq!(
+        history_passwords(&vault, github),
+        ["gh-old-1".to_owned(), "gh-old-2".to_owned(), previous]
+    );
+}
+
+#[test]
+fn delete_restore_and_permanent_delete_with_tombstones() {
+    let (_f, mut vault) = new_vault();
+    let root = vault.tree().id;
+    let work = vault.create_group(root, "Work").expect("group");
+    let mut d = draft(&vault, "Jira", "pw");
+    d.group_id = work;
+    let id = vault.save_entry(&d).expect("create");
+
+    vault.delete_entry(id).expect("to bin");
+    let bin = vault
+        .tree()
+        .children
+        .iter()
+        .find(|g| g.is_recycle_bin)
+        .expect("bin")
+        .id;
+    assert_eq!(vault.get_entry(id).expect("entry").summary.group_id, bin);
+    vault.restore_entry(id).expect("restore");
+    assert_eq!(vault.get_entry(id).expect("entry").summary.group_id, work);
+
+    vault.delete_entry(id).expect("to bin");
+    vault.delete_entry(id).expect("permanently");
+    assert!(matches!(vault.get_entry(id), Err(VaultError::NotFound)));
+    assert!(vault.db.deleted_objects.contains_key(&id.0));
+}
+
+#[test]
+fn deleting_a_group_from_the_bin_leaves_tombstones_for_everything_in_it() {
+    let (_f, mut vault) = new_vault();
+    let root = vault.tree().id;
+    let parent = vault.create_group(root, "Parent").expect("group");
+    let child = vault.create_group(parent, "Child").expect("group");
+    let mut d = draft(&vault, "Deep", "pw");
+    d.group_id = child;
+    let entry = vault.save_entry(&d).expect("create");
+
+    vault.delete_group(parent).expect("to bin");
+    assert!(vault.db.deleted_objects.is_empty());
+    vault.delete_group(parent).expect("permanently");
+    for uuid in [parent.0, child.0, entry.0] {
+        assert!(vault.db.deleted_objects.contains_key(&uuid), "{uuid}");
+    }
+}
+
+#[test]
+fn without_the_recycle_bin_deletion_is_permanent() {
+    let (_f, mut vault) = new_vault();
+    vault.set_recycle_bin_enabled(false);
+    let id = vault
+        .save_entry(&draft(&vault, "Gone", "pw"))
+        .expect("create");
+    vault.delete_entry(id).expect("delete");
+    assert!(matches!(vault.get_entry(id), Err(VaultError::NotFound)));
+    assert!(vault.db.deleted_objects.contains_key(&id.0));
+}
+
+#[test]
+fn group_moves_reject_cycles_the_root_and_the_bin() {
+    let (_f, mut vault) = new_vault();
+    let root = vault.tree().id;
+    let a = vault.create_group(root, "A").expect("group");
+    let b = vault.create_group(a, "B").expect("group");
+    assert!(vault.move_group(a, b).is_err());
+    assert!(vault.move_group(root, a).is_err());
+    let doomed = vault.create_group(root, "Doomed").expect("group");
+    vault.delete_group(doomed).expect("to bin");
+    let bin = vault
+        .tree()
+        .children
+        .iter()
+        .find(|g| g.is_recycle_bin)
+        .expect("bin")
+        .id;
+    assert!(vault.move_group(a, bin).is_err());
+    vault.move_group(b, root).expect("move");
+    vault.rename_group(b, "Renamed").expect("rename");
+    assert!(vault.tree().children.iter().any(|g| g.name == "Renamed"));
+}
+
+// ------------------------------------------------------------------ search
+
+#[test]
+fn search_matches_all_words_but_never_passwords_or_the_bin() {
+    let (_f, mut vault) = new_vault();
+    let a = vault
+        .save_entry(&draft(&vault, "Gitea", "hunter2"))
+        .expect("a");
+    let b = vault.save_entry(&draft(&vault, "Mail", "pw")).expect("b");
+    assert_eq!(vault.search("gitea notes"), [a]);
+    assert_eq!(vault.search("MAIL.example"), [b]);
+    assert!(vault.search("hunter2").is_empty());
+    vault.delete_entry(a).expect("to bin");
+    assert!(vault.search("gitea").is_empty());
+}
+
+#[test]
+fn search_over_5000_entries_is_fast() {
+    let (_f, mut vault) = new_vault();
+    for n in 0..5000 {
+        vault
+            .save_entry(&draft(&vault, &format!("entry {n}"), "pw"))
+            .expect("create");
+    }
+    vault.search("warm the index");
+    let start = Instant::now();
+    let hits = vault.search("entry 4999");
+    let elapsed = start.elapsed();
+    assert_eq!(hits.len(), 1);
+    assert!(elapsed.as_millis() < 50, "{elapsed:?}");
+}
+
+// ------------------------------------------------------------------ external changes
+
+fn external_bytes() -> Vec<u8> {
+    let (f, mut other) = new_vault();
+    other.rename_database("External").expect("rename");
+    other.save().expect("save");
+    std::fs::read(&f.path).expect("read")
+}
+
+#[test]
+fn a_change_by_another_program_blocks_save_until_reload_or_overwrite() {
+    let (f, mut vault) = new_vault();
+    vault.rename_database("Mine").expect("rename");
+    std::fs::write(&f.path, external_bytes()).expect("external write");
+    assert!(!vault.file_unchanged().expect("check"));
+    assert!(matches!(vault.save(), Err(VaultError::ExternalChange)));
+    vault.save_overwrite().expect("keep mine");
+    assert_eq!(reopen(&f).info().name, "Mine");
+
+    std::fs::write(&f.path, external_bytes()).expect("external write");
+    vault.reload().expect("reload");
+    assert_eq!(vault.info().name, "External");
+    assert!(!vault.is_dirty());
+    vault.save().expect("save after reload");
+}
+
+#[test]
+fn a_write_during_open_is_detected_at_the_next_save() {
+    let (f, _vault) = new_vault();
+    let external = external_bytes();
+    let path = f.path.clone();
+    hook::set(move |phase| {
+        if phase == Phase::OpenAfterRead {
+            std::fs::write(&path, &external).expect("external write");
+        }
+    });
+    let mut vault = reopen(&f);
+    hook::clear();
+    // The model is the one that was read, and the next save notices.
+    assert_eq!(vault.info().name, "Test");
+    vault.rename_database("Mine").expect("rename");
+    assert!(matches!(vault.save(), Err(VaultError::ExternalChange)));
+}
+
+#[test]
+fn writes_during_save_are_never_overwritten() {
+    for phase in [Phase::SaveAfterFirstCheck, Phase::SaveAfterFsync] {
+        let (f, mut vault) = new_vault();
+        vault.rename_database("Mine").expect("rename");
+        let external = external_bytes();
+        let path = f.path.clone();
+        let written = external.clone();
+        hook::set(move |p| {
+            if p == phase {
+                std::fs::write(&path, &written).expect("external write");
+            }
+        });
+        let result = vault.save();
+        hook::clear();
+        assert!(
+            matches!(result, Err(VaultError::ExternalChange)),
+            "{phase:?}"
+        );
+        assert_eq!(std::fs::read(&f.path).expect("read"), external, "{phase:?}");
+        let leftovers = std::fs::read_dir(f.path.parent().expect("dir"))
+            .expect("dir")
+            .filter(|e| {
+                e.as_ref()
+                    .is_ok_and(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            })
+            .count();
+        assert_eq!(leftovers, 0, "{phase:?}");
+        assert!(vault.is_dirty());
+    }
+}
+
+// ------------------------------------------------------------------ credentials
+
+#[test]
+fn reload_uses_the_committed_password_until_a_change_is_saved() {
+    let (f, mut vault) = new_vault();
+    vault
+        .change_master_password(secret("new-password"))
+        .expect("change");
+    // Not saved yet: the file still opens with the old password.
+    vault.reload().expect("reload with the committed password");
+    vault
+        .change_master_password(secret("new-password"))
+        .expect("change");
+    vault.save().expect("save");
+    assert!(matches!(
+        Vault::open(&f.path, secret(PASSWORD)),
+        Err(VaultError::WrongKey)
+    ));
+    Vault::open(&f.path, secret("new-password")).expect("new password");
+    vault
+        .reload()
+        .expect("reload with the new committed password");
+}
+
+#[test]
+fn a_failed_reload_leaves_the_vault_untouched() {
+    let (f, mut vault) = new_vault();
+    vault.rename_database("Unsaved").expect("rename");
+    std::fs::write(&f.path, b"garbage").expect("corrupt");
+    assert!(vault.reload().is_err());
+    assert_eq!(vault.info().name, "Unsaved");
+    assert!(vault.is_dirty());
+}
+
+#[test]
+fn kdf_and_cipher_changes_apply_on_save() {
+    let (f, mut vault) = new_vault();
+    vault
+        .set_kdf(Argon2idParams {
+            memory_mib: 16,
+            iterations: 2,
+            parallelism: 2,
+        })
+        .expect("kdf");
+    vault.set_cipher(Cipher::Aes256).expect("cipher");
+    vault.save().expect("save");
+    let info = reopen(&f).info();
+    assert_eq!(info.cipher, Cipher::Aes256);
+    assert!(matches!(
+        info.kdf,
+        KdfInfo::Argon2 {
+            memory_bytes: 16_777_216,
+            iterations: 2,
+            parallelism: 2,
+            ..
+        }
+    ));
+    assert!(
+        vault
+            .set_kdf(Argon2idParams {
+                memory_mib: 1,
+                iterations: 1,
+                parallelism: 1
+            })
+            .is_err()
+    );
+}

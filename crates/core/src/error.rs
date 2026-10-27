@@ -1,0 +1,37 @@
+//! Errors of the vault API. Messages never contain a secret or a path, so they
+//! can be logged and shown to the user as they are.
+
+use std::io;
+
+#[derive(Debug, thiserror::Error)]
+pub enum VaultError {
+    #[error("wrong password or key")]
+    WrongKey,
+    #[error("not a valid KeePass database")]
+    InvalidFormat,
+    #[error("unsupported database version {major}.{minor}")]
+    UnsupportedVersion { major: u16, minor: u16 },
+    #[error("the file was changed by another application")]
+    ExternalChange,
+    #[error("the file already exists")]
+    AlreadyExists,
+    #[error("this vault has no file to save to")]
+    NoFile,
+    #[error("no such entry or group")]
+    NotFound,
+    #[error("invalid {0}")]
+    Invalid(&'static str),
+    #[error("I/O error ({0:?})")]
+    Io(io::ErrorKind),
+}
+
+impl From<io::Error> for VaultError {
+    fn from(e: io::Error) -> Self {
+        match e.kind() {
+            io::ErrorKind::AlreadyExists => VaultError::AlreadyExists,
+            kind => VaultError::Io(kind),
+        }
+    }
+}
+
+pub type Result<T, E = VaultError> = std::result::Result<T, E>;

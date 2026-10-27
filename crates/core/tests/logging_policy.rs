@@ -95,3 +95,73 @@ fn file_paths_appear_only_at_debug() {
         "debug log should name the file: {debug}"
     );
 }
+
+#[test]
+fn vault_operations_log_no_values_or_paths_at_info() {
+    use keyrust_core::model::{Argon2idParams, Cipher, CreateOptions, EntryDraft};
+    use keyrust_core::vault::Vault;
+    use secrecy::SecretString;
+
+    let dir = tempfile::tempdir().unwrap();
+    let dir_name = dir.path().file_name().unwrap().to_str().unwrap().to_owned();
+    let path = dir.path().join("Private Vault 7f3a.kdbx");
+    let secret = |s: &str| SecretString::from(s.to_owned());
+
+    let info = logs_at(tracing::Level::INFO, || {
+        let mut vault = Vault::create(
+            &path,
+            CreateOptions {
+                name: "Household 9c1e".into(),
+                password: secret("master-pw-55aa"),
+                cipher: Cipher::ChaCha20,
+                kdf: Argon2idParams {
+                    memory_mib: 8,
+                    iterations: 1,
+                    parallelism: 1,
+                },
+            },
+        )
+        .unwrap();
+        let root = vault.tree().id;
+        let id = vault
+            .save_entry(&EntryDraft {
+                id: None,
+                group_id: root,
+                title: "Bank 31d4".into(),
+                username: "alice-8b2f".into(),
+                password: secret("entry-pw-77cc"),
+                url: "https://bank-4e6a.example".into(),
+                notes: "pin hint 0d9e".into(),
+            })
+            .unwrap();
+        vault.save().unwrap();
+        let _ = Vault::open(&path, secret("wrong-pw-1234"));
+        let mut vault = Vault::open(&path, secret("master-pw-55aa")).unwrap();
+        vault.delete_entry(id).unwrap();
+        vault.save().unwrap();
+    });
+
+    assert!(info.contains("vault saved"), "log: {info}");
+    assert!(
+        info.contains("entry moved to the recycle bin"),
+        "log: {info}"
+    );
+    for forbidden in [
+        "Private Vault",
+        "7f3a",
+        dir_name.as_str(),
+        "Household",
+        "master-pw",
+        "wrong-pw",
+        "Bank 31d4",
+        "alice-8b2f",
+        "entry-pw",
+        "bank-4e6a",
+        "0d9e",
+    ] {
+        assert!(
+            !info.contains(forbidden),
+            "`{forbidden}` leaked into info logs:\n{info}"
+        );
+    }
+}
