@@ -21,6 +21,7 @@ use secrecy::{ExposeSecret, SecretString};
 use crate::error::{Result, VaultError};
 use crate::file::{self, Phase, ReplaceError, Stamp};
 use crate::kdbx::header::{self, HeaderError};
+use crate::kdbx::limits::{self, Limits};
 use crate::model::{
     Argon2Variant, Argon2idParams, Cipher, CreateOptions, DatabaseInfo, EntryDetail, EntryDraft,
     EntryId, EntrySummary, Field, GroupId, GroupNode, KdfInfo,
@@ -80,6 +81,13 @@ fn check_version(bytes: &[u8]) -> Result<()> {
         }
         Err(_) => Err(VaultError::InvalidFormat),
     }
+}
+
+fn check_limits(bytes: &[u8], limits: &Limits) -> Result<()> {
+    limits::check(bytes, limits).map_err(|exceeded| {
+        tracing::warn!(?exceeded, "database refused: exceeds resource limits");
+        VaultError::TooExpensive
+    })
 }
 
 fn map_open_error(e: DatabaseOpenError) -> VaultError {
@@ -174,7 +182,8 @@ impl Vault {
         // Saving replaces a file by rename: through a symbolic link that would
         // replace the link, so the vault keeps the link's target instead.
         let path = &std::fs::canonicalize(path)?;
-        let bytes = std::fs::read(path)?;
+        let bytes = file::read_limited(path, Limits::DEFAULT.max_file_bytes)?
+            .ok_or(VaultError::TooExpensive)?;
         file::fire(Phase::OpenAfterRead);
         let mut vault = Self::open_bytes(&bytes, password)?;
         vault.path = Some(path.to_path_buf());
@@ -186,6 +195,17 @@ impl Vault {
 
     /// Opens a database from memory (no file to save to).
     pub fn open_bytes(bytes: &[u8], password: SecretString) -> Result<Self> {
+        Self::open_bytes_with_limits(bytes, password, &Limits::DEFAULT)
+    }
+
+    /// Like `open_bytes`, with explicit resource limits (fuzzing, tests).
+    /// The limits are checked on the header before any key derivation.
+    pub fn open_bytes_with_limits(
+        bytes: &[u8],
+        password: SecretString,
+        limits: &Limits,
+    ) -> Result<Self> {
+        check_limits(bytes, limits)?;
         check_version(bytes)?;
         let db = Database::parse(bytes, key(&password)).map_err(map_open_error)?;
         Ok(Self {
@@ -302,7 +322,9 @@ impl Vault {
     /// changes. On failure the vault is left exactly as it was.
     pub fn reload(&mut self) -> Result<()> {
         let path = self.path.clone().ok_or(VaultError::NoFile)?;
-        let bytes = std::fs::read(&path)?;
+        let bytes = file::read_limited(&path, Limits::DEFAULT.max_file_bytes)?
+            .ok_or(VaultError::TooExpensive)?;
+        check_limits(&bytes, &Limits::DEFAULT)?;
         check_version(&bytes)?;
         let db = Database::parse(&bytes, key(&self.committed)).map_err(map_open_error)?;
         self.db = db;

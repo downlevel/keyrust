@@ -10,11 +10,26 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-keyrust-core = { path = "../crates/core" }
+keyrust-core = { path = "../crates/core", features = ["fuzzing"] }
+secrecy = "0.10"
 
 # Not part of the main workspace: cargo-fuzz needs nightly and its own profile.
 [workspace]
 members = ["."]
+
+[[bin]]
+name = "vault_open_bytes"
+path = "fuzz_targets/vault_open_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vault_roundtrip"
+path = "fuzz_targets/vault_roundtrip.rs"
+test = false
+doc = false
+bench = false
 
 [[bin]]
 name = "kdbx_header_peek"

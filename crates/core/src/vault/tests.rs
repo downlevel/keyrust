@@ -744,3 +744,72 @@ fn saving_through_a_symbolic_link_updates_the_target() {
     );
     assert_eq!(reopen(&f).info().name, "Through the link");
 }
+
+// ------------------------------------------------------------------ milestone 3c: resource limits
+
+#[test]
+fn files_beyond_the_limits_are_refused_before_the_kdf() {
+    use crate::kdbx::limits::Limits;
+    let (f, _vault) = new_vault();
+    let bytes = std::fs::read(&f.path).expect("read");
+    for strict in [
+        Limits {
+            max_argon2_memory_bytes: 1024 * 1024,
+            ..Limits::DEFAULT
+        },
+        Limits {
+            max_argon2_iterations: 0,
+            ..Limits::DEFAULT
+        },
+        Limits {
+            max_argon2_parallelism: 0,
+            ..Limits::DEFAULT
+        },
+        Limits {
+            max_file_bytes: 100,
+            ..Limits::DEFAULT
+        },
+    ] {
+        let start = Instant::now();
+        let result = Vault::open_bytes_with_limits(&bytes, secret(PASSWORD), &strict);
+        assert!(
+            matches!(result, Err(VaultError::TooExpensive)),
+            "{strict:?}"
+        );
+        assert!(start.elapsed().as_millis() < 50, "refused before the KDF");
+    }
+    Vault::open_bytes_with_limits(&bytes, secret(PASSWORD), &Limits::DEFAULT).expect("default");
+}
+
+#[test]
+fn reading_is_bounded_even_if_the_file_grows() {
+    let (f, _vault) = new_vault();
+    let path = f.path.clone();
+    let len = std::fs::metadata(&path).expect("meta").len();
+    assert!(file::read_limited(&path, len).expect("read").is_some());
+    assert!(file::read_limited(&path, len - 1).expect("read").is_none());
+
+    let grown = path.clone();
+    hook::set(move |phase| {
+        if phase == Phase::OpenBeforeRead {
+            let mut bigger = std::fs::read(&grown).expect("read");
+            bigger.extend(std::iter::repeat_n(0u8, 4096));
+            std::fs::write(&grown, bigger).expect("grow");
+        }
+    });
+    let result = file::read_limited(&path, len + 100);
+    hook::clear();
+    assert!(
+        result.expect("read").is_none(),
+        "growth past the limit is refused"
+    );
+}
+
+#[test]
+fn change_checks_do_not_read_a_much_larger_file() {
+    let (f, vault) = new_vault();
+    let mut bigger = std::fs::read(&f.path).expect("read");
+    bigger.extend(std::iter::repeat_n(7u8, 1024 * 1024));
+    std::fs::write(&f.path, bigger).expect("write");
+    assert!(!vault.file_unchanged().expect("check"));
+}

@@ -11,6 +11,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: "Seconds per fuzz target (long manual run)"
+        required: false
+        default: "60"
 
 permissions:
   contents: read
@@ -157,8 +162,11 @@ jobs:
           rust-version: "1.99.1"
 
   fuzz:
-    name: fuzz (60 s per target)
+    name: fuzz
     runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      FUZZ_SECONDS: ${{ github.event.inputs.fuzz_seconds || '60' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install nightly and cargo-fuzz
@@ -174,7 +182,8 @@ jobs:
         run: |
           for target in $(cargo +nightly fuzz list); do
             mkdir -p "corpus/$target"
-            cargo +nightly fuzz run "$target" "corpus/$target" -- -max_total_time=60
+            cargo +nightly fuzz run "$target" "corpus/$target" -- \
+              -max_total_time="$FUZZ_SECONDS" -timeout=10 -rss_limit_mb=2048
           done
       - name: Upload crashes
         if: failure()
