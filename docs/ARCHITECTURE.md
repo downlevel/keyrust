@@ -118,10 +118,13 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
 
 ## Flussi chiave lato backend
 - **Salvataggio atomico** (`crates/core/src/file.rs`):
-  - lock advisory tra istanze di Keyrust (file nella directory temporanea, chiave = hash del percorso);
+  - lock advisory tra istanze di Keyrust: `.<nome>.keyrust-lock` accanto al database (permessi 0600, lasciato sul
+    posto perché rimuoverlo creerebbe una race);
   - confronto dello stampo (lunghezza + SHA-256 dei byte letti o scritti l'ultima volta);
   - serializzazione in un file temporaneo esclusivo nella stessa directory → `fsync`;
-  - **secondo confronto** subito prima del `rename` → `fsync` della directory (Unix).
+  - il file temporaneo nasce con permessi 0600 e prende quelli del file originale (un vault 0600 resta 0600);
+  - **secondo confronto** subito prima del `rename` → `fsync` della directory (Unix). Se questo `fsync` fallisce il
+    file è già stato sostituito: lo stato del vault segue il file e l'errore è `NotDurable`.
   - Se lo stampo non corrisponde il salvataggio è rifiutato (`ExternalChange`) e l'utente sceglie *Reload*
     (`Vault::reload`, con le credenziali confermate) o *Keep mine* (`save_overwrite`). Niente merge in V1.
   - Rischio residuo: uno scrittore che non usa il lock può scrivere tra l'ultimo confronto e il `rename`.

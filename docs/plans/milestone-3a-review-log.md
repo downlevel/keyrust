@@ -18,3 +18,25 @@
 
 ## Round 2 — stessa sessione — **APPROVED**, 0 findings — plan sha256 ade814a9…5fc
 - Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3ar1/claudex-6rfpmgee/result.json`
+
+## Build (host Claude)
+- 66bf1ea: implementazione. Verifiche locali: 45 unit + T0–T6 + V1–V5 + logging policy verdi, clippy e fmt puliti,
+  `cargo deny` ok; mutation check (ordine della cronologia, controllo dello stampo, Debug, set del generatore) tutti
+  rilevati.
+- Scoperto durante la build: KeePassXC scrive KDBX 4.0 quando non servono funzioni 4.1 e keepass-rs salva solo 4.1,
+  quindi il vault porta la versione a 4.1 al salvataggio (coperto da V5).
+
+## Inspection 1 — Codex codex-cli 0.164.0 (sessione nuova 01a17f55-6ab3-7ab0-925d-2f4c48479856) — REVISE, 1 high + 5 medium
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3ai1/claudex-bro4kjbz/result.json`. Tutti **ACCETTATI**; i 5 test nuovi falliscono sul codice di
+  66bf1ea e passano dopo le correzioni (50 unit verdi, integrazione invariata):
+  - **R1 (high)** gli spostamenti tracciati di keepass-rs aggiungevano una versione in testa alla cronologia → spostamenti
+    non tracciati con `location_changed` esplicito; test su move / cestino / ripristino / modifica + spostamento.
+  - **R2** una password importata non protetta restava tale → `save_entry` la protegge sempre (senza nuova versione).
+  - **R3** il limite di dimensione lasciava sempre una versione e ignorava gli allegati → dimensione con i dati degli
+    allegati; limiti a 0 svuotano la cronologia.
+  - **R4** il salvataggio rendeva 0644 un vault 0600 → tmp 0600 e permessi dell'originale copiati prima del rename.
+  - **R5** `fsync` della directory ignorato (e saltato per percorsi relativi) → errore propagato come `NotDurable` dopo
+    il rename, con lo stato del vault allineato al file.
+  - **R6** directory dei lock in `/tmp` condivisa tra utenti (e deviazione non documentata dal piano) → lock accanto
+    al database come da piano, permessi 0600.
+- Effetto collaterale accettato: anche `settings.json` (che usa lo stesso helper per il tmp) ora nasce con permessi 0600.

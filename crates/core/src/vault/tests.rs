@@ -555,3 +555,121 @@ fn kdf_and_cipher_changes_apply_on_save() {
             .is_err()
     );
 }
+
+// ------------------------------------------------------------------ inspection regressions
+
+#[test]
+fn moves_recycling_and_restoring_add_no_history() {
+    let (_f, mut vault) = new_vault();
+    let root = vault.tree().id;
+    let work = vault.create_group(root, "Work").expect("group");
+    let id = vault
+        .save_entry(&draft(&vault, "Bank", "pw-1"))
+        .expect("create");
+    let mut d = vault.entry_for_edit(id).expect("draft");
+    d.password = secret("pw-2");
+    vault.save_entry(&d).expect("update");
+    assert_eq!(history_passwords(&vault, id), ["pw-1"]);
+
+    vault.move_entry(id, work).expect("move");
+    vault.delete_entry(id).expect("to bin");
+    vault.restore_entry(id).expect("restore");
+    assert_eq!(history_passwords(&vault, id), ["pw-1"]);
+
+    // Editing and moving in one save adds exactly one version: the old one.
+    let mut d = vault.entry_for_edit(id).expect("draft");
+    d.password = secret("pw-3");
+    d.group_id = root;
+    vault.save_entry(&d).expect("edit and move");
+    assert_eq!(history_passwords(&vault, id), ["pw-1", "pw-2"]);
+    assert_eq!(vault.get_entry(id).expect("entry").summary.group_id, root);
+}
+
+#[test]
+fn an_unprotected_password_becomes_protected_on_save() {
+    let (_f, mut vault) = new_vault();
+    let id = vault
+        .save_entry(&draft(&vault, "Imported", "plain"))
+        .expect("create");
+    let kid = vault.entry_ref(id).expect("entry").id();
+    vault
+        .db
+        .entry_mut(kid)
+        .expect("entry")
+        .set_unprotected(fields::PASSWORD, "plain");
+    let unchanged = vault.entry_for_edit(id).expect("draft");
+    vault.save_entry(&unchanged).expect("save");
+    let e = vault.entry_ref(id).expect("entry");
+    assert!(e.fields[fields::PASSWORD].is_protected());
+    assert_eq!(e.get_password(), Some("plain"));
+    assert!(
+        history_passwords(&vault, id).is_empty(),
+        "no content change"
+    );
+    assert!(vault.is_dirty());
+}
+
+#[test]
+fn history_limits_count_attachments_and_may_drop_everything() {
+    let (_f, mut vault) = new_vault();
+    let id = vault
+        .save_entry(&draft(&vault, "Big", "pw-0"))
+        .expect("create");
+    let kid = vault.entry_ref(id).expect("entry").id();
+    vault
+        .db
+        .entry_mut(kid)
+        .expect("entry")
+        .add_attachment("blob.bin", Value::unprotected(vec![7u8; 2 * 1024 * 1024]));
+
+    vault.db.meta.history_max_size = Some(3 * 1024 * 1024);
+    for n in 1..=3 {
+        let mut d = vault.entry_for_edit(id).expect("draft");
+        d.password = secret(&format!("pw-{n}"));
+        vault.save_entry(&d).expect("update");
+    }
+    // Each version carries the 2 MiB attachment: only one fits in 3 MiB.
+    assert_eq!(history_passwords(&vault, id), ["pw-2"]);
+
+    vault.db.meta.history_max_size = Some(0);
+    let mut d = vault.entry_for_edit(id).expect("draft");
+    d.password = secret("pw-4");
+    vault.save_entry(&d).expect("update");
+    assert!(history_passwords(&vault, id).is_empty());
+
+    vault.db.meta.history_max_size = None;
+    vault.db.meta.history_max_items = Some(0);
+    let mut d = vault.entry_for_edit(id).expect("draft");
+    d.password = secret("pw-5");
+    vault.save_entry(&d).expect("update");
+    assert!(history_passwords(&vault, id).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_keeps_restrictive_permissions_and_new_files_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path| std::fs::metadata(p).expect("metadata").permissions().mode() & 0o777;
+
+    let (f, mut vault) = new_vault();
+    assert_eq!(mode(&f.path) & 0o077, 0, "a new vault is owner-only");
+    std::fs::set_permissions(&f.path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    vault.rename_database("Again").expect("rename");
+    vault.save().expect("save");
+    assert_eq!(mode(&f.path), 0o600);
+
+    std::fs::set_permissions(&f.path, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+    let mut vault = reopen(&f);
+    vault
+        .rename_database("Shared with the group")
+        .expect("rename");
+    vault.save().expect("save");
+    assert_eq!(mode(&f.path), 0o640, "an existing mode is preserved");
+}
+
+#[test]
+fn the_save_lock_lives_next_to_the_database() {
+    let (f, _vault) = new_vault();
+    let lock = f.path.with_file_name(".test.kdbx.keyrust-lock");
+    assert!(lock.exists());
+}

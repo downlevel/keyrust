@@ -142,13 +142,29 @@ fn outer_cipher(cipher: Cipher) -> Result<OuterCipherConfig> {
     }
 }
 
-/// Approximate size of an entry version for the history limit: its fields.
-fn entry_size(entry: &Entry) -> usize {
-    entry
+/// Size of an entry version for the history limit: its fields and the data
+/// of its attachments (KeePass counts binaries too).
+fn version_size(entry: &EntryRef<'_>) -> usize {
+    let fields: usize = entry
         .fields
         .iter()
         .map(|(k, v)| k.len() + v.get().len())
-        .sum()
+        .sum();
+    let attachments: usize = entry.attachments().map(|a| a.data.get().len()).sum();
+    fields + attachments
+}
+
+/// Moves an entry without keepass-rs's tracked move, whose drop handler would
+/// prepend a history snapshot behind Keyrust's back.
+fn move_untracked(
+    entry: &mut keepass::db::EntryMut<'_>,
+    target: keepass::db::GroupId,
+) -> Result<()> {
+    entry
+        .move_to(target)
+        .map_err(|_| VaultError::Invalid("group"))?;
+    entry.times.location_changed = Some(now());
+    Ok(())
 }
 
 impl Vault {
@@ -247,8 +263,15 @@ impl Vault {
             tracing::warn!(error = %e, "cannot serialise vault");
             VaultError::Io(std::io::ErrorKind::Other)
         })?;
+        let mut durability = Ok(());
         match file::replace(&path, &bytes, expected.as_ref(), overwrite) {
             Ok(()) => {}
+            // The file was replaced but the directory sync failed: the state
+            // below must follow the file on disk, and the caller is told.
+            Err(ReplaceError::NotDurable(e)) => {
+                tracing::warn!(error_kind = ?e.kind(), "saved, but not confirmed durable");
+                durability = Err(VaultError::NotDurable(e.kind()));
+            }
             Err(ReplaceError::Changed) => {
                 tracing::warn!("save refused: file changed by another application");
                 return Err(VaultError::ExternalChange);
@@ -264,7 +287,7 @@ impl Vault {
         }
         self.dirty = false;
         tracing::info!(entries = self.db.num_entries(), "vault saved");
-        Ok(())
+        durability
     }
 
     /// Re-reads the file with the committed key ("Reload"), dropping unsaved
@@ -618,9 +641,14 @@ impl Vault {
             return Ok(id);
         };
 
-        let (kid, current_group) = {
+        let (kid, current_group, mut sizes, current_size) = {
             let e = self.entry_ref(id)?;
-            (e.id(), e.parent().id())
+            let count = e.history.as_ref().map_or(0, |h| h.get_entries().len());
+            let sizes: Vec<usize> = (0..count)
+                .filter_map(|i| e.historical(i))
+                .map(|v| version_size(&v))
+                .collect();
+            (e.id(), e.parent().id(), sizes, version_size(&e))
         };
         let (max_items, max_size) = self.history_limits();
         let mut entry = self.db.entry_mut(kid).ok_or(VaultError::NotFound)?;
@@ -644,6 +672,16 @@ impl Vault {
             }
             modified = true;
         }
+        // The password is always stored protected, even if it arrived
+        // unprotected from another client and its text did not change.
+        let mut protected_now = false;
+        if let Some(value) = entry.fields.get(fields::PASSWORD)
+            && !value.is_protected()
+        {
+            let value = value.get().clone();
+            entry.set_protected(fields::PASSWORD, value);
+            protected_now = true;
+        }
         if modified {
             let time = now();
             entry.times.last_modification = Some(time);
@@ -654,10 +692,14 @@ impl Vault {
                 .map(|h| h.get_entries().clone())
                 .unwrap_or_default();
             versions.push(previous);
-            while versions.len() > max_items
-                || (versions.len() > 1 && versions.iter().map(entry_size).sum::<usize>() > max_size)
+            sizes.push(current_size);
+            // Oldest versions go first; the limits apply even if that leaves
+            // no history at all (history_max_items/max_size = 0).
+            while !versions.is_empty()
+                && (versions.len() > max_items || sizes.iter().sum::<usize>() > max_size)
             {
                 versions.remove(0);
+                sizes.remove(0);
             }
             // `History::add_entry` inserts at the front: add newest first so
             // the final order is oldest first.
@@ -669,12 +711,9 @@ impl Vault {
         }
         let moved = current_group != group;
         if moved {
-            entry
-                .track_changes()
-                .move_to(group)
-                .map_err(|_| VaultError::Invalid("group"))?;
+            move_untracked(&mut entry, group)?;
         }
-        if modified || moved {
+        if modified || moved || protected_now {
             self.changed();
             tracing::info!(modified, moved, "entry updated");
         }
@@ -710,10 +749,7 @@ impl Vault {
         }
         let mut entry = self.db.entry_mut(kid).ok_or(VaultError::NotFound)?;
         if current_group != target {
-            entry
-                .track_changes()
-                .move_to(target)
-                .map_err(|_| VaultError::Invalid("group"))?;
+            move_untracked(&mut entry, target)?;
             self.changed();
         }
         Ok(())
@@ -728,10 +764,7 @@ impl Vault {
         if self.recycle_bin_enabled() && !self.in_recycle_bin(parent) {
             let bin = self.ensure_recycle_bin();
             let mut entry = self.db.entry_mut(kid).ok_or(VaultError::NotFound)?;
-            entry
-                .track_changes()
-                .move_to(bin)
-                .map_err(|_| VaultError::Invalid("entry"))?;
+            move_untracked(&mut entry, bin)?;
             tracing::info!("entry moved to the recycle bin");
         } else {
             let mut entry = self.db.entry_mut(kid).ok_or(VaultError::NotFound)?;
@@ -755,10 +788,7 @@ impl Vault {
             .filter(|g| !self.in_recycle_bin(*g))
             .unwrap_or_else(|| self.db.root().id());
         let mut entry = self.db.entry_mut(kid).ok_or(VaultError::NotFound)?;
-        entry
-            .track_changes()
-            .move_to(target)
-            .map_err(|_| VaultError::Invalid("entry"))?;
+        move_untracked(&mut entry, target)?;
         self.changed();
         Ok(())
     }

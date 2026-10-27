@@ -77,30 +77,40 @@ pub(crate) use hook::fire;
 #[cfg(not(test))]
 pub(crate) fn fire(_: Phase) {}
 
-/// Advisory lock shared by Keyrust processes saving the same file. It lives
-/// in the temporary directory (keyed by the file's path) so that nothing is
-/// added next to the database, e.g. in a synchronised folder.
+/// Advisory lock shared by Keyrust processes saving the same file:
+/// `.<name>.keyrust-lock` next to the database (owner-only permissions). It is
+/// left in place; removing it would race with another process taking it.
 pub(crate) struct SaveLock {
     _file: File,
 }
 
 impl SaveLock {
     pub(crate) fn acquire(path: &Path) -> io::Result<Self> {
-        let absolute = fs::canonicalize(path).or_else(|_| std::path::absolute(path))?;
-        let dir = std::env::temp_dir().join("keyrust-locks");
-        fs::create_dir_all(&dir)?;
-        let name: String = Sha256::digest(absolute.as_os_str().as_encoded_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let file = OpenOptions::new()
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "vault".to_owned());
+        let lock = path.with_file_name(format!(".{name}.keyrust-lock"));
+        let file = private_options()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(dir.join(format!("{name}.lock")))?;
+            .open(lock)?;
         file.lock()?;
         Ok(Self { _file: file })
     }
+}
+
+/// New files readable and writable by their owner only (Unix).
+fn private_options() -> OpenOptions {
+    #[allow(unused_mut)]
+    let mut options = OpenOptions::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
 }
 
 /// Creates `<name>.<pid>-<n>.tmp` next to `path`, failing rather than reusing
@@ -114,7 +124,7 @@ pub(crate) fn create_unique_tmp(path: &Path) -> io::Result<(PathBuf, File)> {
     loop {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let tmp = path.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
-        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        match private_options().write(true).create_new(true).open(&tmp) {
             Ok(file) => return Ok((tmp, file)),
             // Left over by a crashed process that had the same id.
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -128,6 +138,8 @@ pub(crate) fn create_unique_tmp(path: &Path) -> io::Result<(PathBuf, File)> {
 pub(crate) enum ReplaceError {
     Changed,
     Io(io::Error),
+    /// Replaced, but the directory could not be synced.
+    NotDurable(io::Error),
 }
 
 impl From<io::Error> for ReplaceError {
@@ -161,6 +173,11 @@ pub(crate) fn replace(
 
     let (tmp, mut file) = create_unique_tmp(path)?;
     let result = (|| -> Result<(), ReplaceError> {
+        // The replacement keeps the original's permissions (a 0600 vault
+        // stays 0600); a new file stays owner-only.
+        if let Ok(meta) = fs::metadata(path) {
+            file.set_permissions(meta.permissions())?;
+        }
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
@@ -174,18 +191,23 @@ pub(crate) fn replace(
         let _ = fs::remove_file(&tmp);
     }
     result?;
-    sync_dir(path);
-    Ok(())
+    sync_dir(path).map_err(ReplaceError::NotDurable)
 }
 
-/// Makes the rename durable (directory entry) where the platform allows it.
-fn sync_dir(path: &Path) {
+/// Makes the rename durable (directory entry). Windows has no directory
+/// handle to sync: the rename is flushed with the file system metadata.
+fn sync_dir(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
-        && let Ok(dir) = File::open(dir)
     {
-        let _ = dir.sync_all();
+        let dir = match path.parent() {
+            Some(d) if !d.as_os_str().is_empty() => d,
+            _ => Path::new("."),
+        };
+        File::open(dir)?.sync_all()
     }
     #[cfg(not(unix))]
-    let _ = path;
+    {
+        let _ = path;
+        Ok(())
+    }
 }

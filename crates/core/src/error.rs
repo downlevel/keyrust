@@ -23,6 +23,10 @@ pub enum VaultError {
     Invalid(&'static str),
     #[error("I/O error ({0:?})")]
     Io(io::ErrorKind),
+    /// The file was written and replaced, but the system could not confirm
+    /// that the change reached the disk (directory sync failed).
+    #[error("saved, but the change may not be on disk yet ({0:?})")]
+    NotDurable(io::ErrorKind),
 }
 
 impl From<io::Error> for VaultError {
