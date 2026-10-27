@@ -95,6 +95,14 @@ export class AppState {
 
 	private session = 0;
 	private selection = 0;
+	/** Latest generator request; older answers are dropped. */
+	private generatorRequest = 0;
+	/**
+	 * Session-changing backend calls (unlock, create, lock) run one at a time,
+	 * so a stale completion can be undone before the next one starts and can
+	 * never replace or lock a newer session.
+	 */
+	private sessionOps: Promise<void> = Promise.resolve();
 	private toastTimer: ReturnType<typeof setInterval> | null = null;
 
 	readonly isDemo: boolean;
@@ -193,6 +201,25 @@ export class AppState {
 		this.screen = "unlock";
 	}
 
+	private serialize<T>(op: () => Promise<T>): Promise<T> {
+		const run = this.sessionOps.then(op, op);
+		this.sessionOps = run.then(
+			() => {},
+			() => {},
+		);
+		return run;
+	}
+
+	/** Opens a session in the backend unless the UI moved on meanwhile. */
+	private openSession(session: number, open: () => Promise<DatabaseInfo>) {
+		return this.serialize(async () => {
+			const info = await open();
+			if (session === this.session) return info;
+			await this.api.vault.lock();
+			return null;
+		});
+	}
+
 	async unlock(password: string) {
 		const recent = this.recents[this.recentIndex];
 		if (!recent || this.busy) return;
@@ -200,11 +227,10 @@ export class AppState {
 		this.busy = "unlock";
 		this.unlockError = null;
 		try {
-			const info = await this.api.vault.unlock(recent.path, password);
-			if (session !== this.session) {
-				void this.api.vault.lock();
-				return;
-			}
+			const info = await this.openSession(session, () =>
+				this.api.vault.unlock(recent.path, password),
+			);
+			if (!info || session !== this.session) return;
 			await this.enterVault(info, session);
 		} catch (e) {
 			if (session !== this.session) return;
@@ -240,11 +266,8 @@ export class AppState {
 		this.busy = "create";
 		this.createError = false;
 		try {
-			const info = await this.api.vault.create(options);
-			if (session !== this.session) {
-				void this.api.vault.lock();
-				return;
-			}
+			const info = await this.openSession(session, () => this.api.vault.create(options));
+			if (!info || session !== this.session) return;
 			this.recents = [
 				{ name: info.name, path: info.path, missing: false },
 				...this.recents.filter((r) => r.path !== info.path),
@@ -298,7 +321,8 @@ export class AppState {
 		this.query = "";
 		this.busy = null;
 		this.unlockError = null;
-		void this.api.vault.lock();
+		this.generated = "";
+		void this.serialize(() => this.api.vault.lock());
 		this.screen = this.recents.length ? "unlock" : "welcome";
 	}
 
@@ -319,7 +343,11 @@ export class AppState {
 		if (pending?.kind !== "leave") return;
 		this.confirm = null;
 		if (choice === "keep") return;
+		const session = this.session;
+		// The transition runs only after a save that reached the file, and only
+		// if nothing (Lock, another database) replaced the session meanwhile.
 		if (choice === "save" && !(await this.saveEditor())) return;
+		if (session !== this.session) return;
 		this.closeEditor();
 		await pending.action();
 	}
@@ -328,6 +356,7 @@ export class AppState {
 		if (!this.editor) return;
 		this.selection++;
 		this.editor = null;
+		this.generated = "";
 		if (this.overlay === "generator") this.overlay = null;
 	}
 
@@ -484,16 +513,20 @@ export class AppState {
 			return false;
 		}
 		if (session !== this.session || selection !== this.selection) return false;
-		this.selection++;
+		const after = ++this.selection;
 		this.editor = null;
+		this.generated = "";
 		if (this.overlay === "generator") this.overlay = null;
 		await this.refresh(session);
 		if (session !== this.session) return false;
-		if (this.groupId !== ALL && this.groupId !== editor.draft.groupId) this.groupId = ALL;
-		this.query = "";
-		await this.loadEntry(id);
-		await this.persist();
-		return true;
+		// Show the saved entry unless the user has moved on meanwhile.
+		if (after === this.selection) {
+			if (this.groupId !== ALL && this.groupId !== editor.draft.groupId) this.groupId = ALL;
+			this.query = "";
+			await this.loadEntry(id);
+		}
+		if (session !== this.session) return false;
+		return this.persist();
 	}
 
 	// ---------------------------------------------------------------- entries and groups
@@ -505,7 +538,7 @@ export class AppState {
 			kind: "deleteEntry",
 			id: e.id,
 			title: e.title,
-			permanent: e.groupId === this.recycleBinId,
+			permanent: e.groupId === this.recycleBinId || !this.db?.recycleBin,
 		};
 	}
 
@@ -581,19 +614,22 @@ export class AppState {
 
 	// ---------------------------------------------------------------- saving
 
-	async persist() {
-		if (!this.db) return;
+	/** Writes the file; true only if it was written for the current session. */
+	async persist(): Promise<boolean> {
+		if (!this.db) return false;
 		const session = this.session;
 		this.saveState = "saving";
 		try {
 			await this.api.vault.save();
-			if (session !== this.session) return;
+			if (session !== this.session) return false;
 			this.saveState = "saved";
 			if (this.banner === "saveFailed") this.banner = null;
+			return true;
 		} catch {
-			if (session !== this.session) return;
+			if (session !== this.session) return false;
 			this.saveState = "failed";
 			this.banner = "saveFailed";
+			return false;
 		}
 	}
 
@@ -642,14 +678,27 @@ export class AppState {
 		} catch {
 			this.settings = await this.api.app.getSettings();
 		}
+		// New generator defaults apply to the generator straight away.
+		if (patch.generator) this.generator = generatorFromSettings(this.settings);
 	}
 
 	// ---------------------------------------------------------------- generator
 
 	async regenerate() {
+		const request = ++this.generatorRequest;
 		const session = this.session;
-		const value = await this.api.vault.generatePassword(this.generator);
-		if (session === this.session) this.generated = value;
+		const selection = this.selection;
+		const options = $state.snapshot(this.generator) as GeneratorOptions;
+		// No stale preview: "Use password" stays disabled until this answer.
+		this.generated = "";
+		const value = await this.api.vault.generatePassword(options);
+		if (
+			request === this.generatorRequest &&
+			session === this.session &&
+			selection === this.selection
+		) {
+			this.generated = value;
+		}
 	}
 
 	setGenerator(patch: Partial<GeneratorOptions>) {
@@ -787,6 +836,8 @@ export class AppState {
 		}
 		const c = commandForKeydown(event);
 		if (!c) return;
+		// Plain shortcuts leave selected text alone (Delete, Ctrl+B…).
+		if (c.scope === "outsideText" && globalThis.getSelection?.()?.toString()) return;
 		if (c.demoOnly && !this.isDemo) return;
 		// While a dialog is open only the dialog-independent shortcuts apply.
 		if (this.confirm && c.id !== "lock") return;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryAppApi, normalizeSettings, DEFAULT_SETTINGS } from "$lib/api/app";
 import { DemoVault } from "$lib/api/demo";
 import { AppState } from "$lib/state/app.svelte";
@@ -249,5 +249,94 @@ describe("generator and settings", () => {
 				generator: { ...DEFAULT_SETTINGS.generator, length: 3 },
 			}).generator.length,
 		).toBe(8);
+	});
+});
+
+describe("inspection regressions", () => {
+	async function dirty() {
+		const ctx = await unlocked();
+		await ctx.app.editEntry("github");
+		ctx.app.updateDraft({ username: "someone-else" });
+		return ctx;
+	}
+
+	it("a failed save stops the pending transition (M2-I01)", async () => {
+		const { app, vault } = await dirty();
+		await app.run("close_database");
+		vault.failNextSave = true;
+		await app.resolveLeave("save");
+		expect(app.screen).toBe("vault");
+		expect(app.banner).toBe("saveFailed");
+	});
+
+	it("Lock during Save cancels the pending transition (M2-I02)", async () => {
+		const { app, vault } = await dirty();
+		await app.selectEntry("gitlab");
+		const late = deferred<void>();
+		vault.save = () => late.promise;
+		const pending = app.resolveLeave("save");
+		await new Promise((r) => setTimeout(r, 0));
+		app.lock();
+		late.resolve();
+		await pending;
+		expect(app.screen).toBe("unlock");
+		expect(app.selectedId).toBeNull();
+	});
+
+	it("a stale unlock never locks or replaces a newer session (M2-I03)", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		const realUnlock = vault.unlock.bind(vault);
+		const late = deferred<void>();
+		let calls = 0;
+		vault.unlock = async (path, password) => {
+			if (calls++ === 0) await late.promise;
+			return realUnlock(path, password);
+		};
+		const first = app.unlock("secret");
+		app.selectRecent(1);
+		const second = app.unlock("secret");
+		late.resolve();
+		await Promise.all([first, second]);
+		expect(app.screen).toBe("vault");
+		expect(app.db?.name).toBe("Work");
+		await expect(vault.listEntries()).resolves.not.toHaveLength(0);
+	});
+
+	it("Lock forgets the last generated password (M2-I04)", async () => {
+		const { app } = await dirty();
+		app.openGenerator();
+		await vi.waitFor(() => expect(app.generated).not.toBe(""));
+		app.lock();
+		expect(app.generated).toBe("");
+	});
+
+	it("only the latest generator request is shown (M2-I05)", async () => {
+		const { app, vault } = await unlocked();
+		const answers: ((v: string) => void)[] = [];
+		vault.generatePassword = () => new Promise((resolve) => answers.push(resolve));
+		app.setGenerator({ length: 10 });
+		app.setGenerator({ length: 30 });
+		answers[1]("b".repeat(30));
+		answers[0]("a".repeat(10));
+		await new Promise((r) => setTimeout(r, 0));
+		expect(app.generated).toBe("b".repeat(30));
+	});
+
+	it("a new default length applies to the generator (M2-I06)", async () => {
+		const { app } = await unlocked();
+		await app.updateSettings({ generator: { ...app.settings.generator, length: 32 } });
+		expect(app.generator.length).toBe(32);
+	});
+
+	it("without the recycle bin, delete is permanent (M2-I07)", async () => {
+		const { app } = await unlocked();
+		await app.updateDatabase({ recycleBin: false });
+		await app.selectEntry("reddit");
+		app.askDeleteEntry();
+		expect(app.confirm).toMatchObject({ kind: "deleteEntry", permanent: true });
+		await app.confirmDelete();
+		expect(app.entries.some((e) => e.id === "reddit")).toBe(false);
 	});
 });

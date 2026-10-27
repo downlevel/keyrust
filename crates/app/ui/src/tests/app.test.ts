@@ -231,6 +231,22 @@ describe("keyboard", () => {
 		expect(await screen.findByText("Password copied · clears in 20s")).toBeInTheDocument();
 	});
 
+	it("plain shortcuts leave selected text alone (M2-I08)", async () => {
+		const { user } = await openVault();
+		await user.click(option(/GitHub/));
+		const heading = await screen.findByRole("heading", { name: "GitHub" });
+		const range = document.createRange();
+		range.selectNodeContents(heading);
+		getSelection()?.removeAllRanges();
+		getSelection()?.addRange(range);
+		fireEvent.keyDown(document.body, { key: "Delete" });
+		await new Promise((r) => setTimeout(r, 0));
+		expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+		getSelection()?.removeAllRanges();
+		fireEvent.keyDown(document.body, { key: "Delete" });
+		expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+	});
+
 	it("arrow keys move through the list and Ctrl+L locks", async () => {
 		const { user } = await openVault();
 		await user.click(option(/Bank of Example/));

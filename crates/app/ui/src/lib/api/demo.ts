@@ -332,7 +332,7 @@ export class DemoVault implements VaultApi {
 	async deleteEntry(id: EntryId): Promise<void> {
 		await this.pause();
 		const e = this.find(id);
-		if (e.groupId === RECYCLE_BIN) {
+		if (e.groupId === RECYCLE_BIN || !this.open().recycleBin) {
 			this.entries = this.entries.filter((x) => x.id !== id);
 		} else {
 			e.previousGroupId = e.groupId;
