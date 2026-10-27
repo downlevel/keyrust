@@ -71,5 +71,6 @@
   - **M2-R205 (low)** etichette "Close" e default inglesi nei componenti vendorizzati → spostate in `en.json`; rimosso
     `command-dialog.svelte` (non usato); il controllo "untranslated text" ora copre anche `components/ui` e i
     default delle prop.
+- CI su d773220: run 40584064526 success su tutti gli 8 job.
 - **Budget di ispezione esaurito** (MAX_INSPECTION_ROUNDS=2): le correzioni di questo round non sono state ispezionate
   da Codex. Lo si segnala all'utente, che decide se chiedere un'ulteriore ispezione prima del merge.
