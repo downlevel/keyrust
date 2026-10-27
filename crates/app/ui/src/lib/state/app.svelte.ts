@@ -13,7 +13,8 @@ import {
 	type GeneratorOptions,
 	type GroupId,
 	type GroupNode,
-	type KdfParams,
+	type Argon2idParams,
+	type DatabasePatch,
 	type RecentFile,
 	type Settings,
 } from "$lib/api";
@@ -41,7 +42,16 @@ export interface EditorState {
 export type Confirm =
 	| { kind: "deleteEntry"; id: EntryId; title: string; permanent: boolean }
 	| { kind: "deleteGroup"; id: GroupId; name: string }
-	| { kind: "leave"; action: () => void | Promise<void> };
+	| { kind: "leave"; action: () => void | Promise<void> }
+	/** The vault has changes the last save could not write. */
+	| { kind: "unsaved"; action: () => void | Promise<void> };
+
+export type UnlockError = "wrongPassword" | "notFound" | "invalidFile" | "failed";
+
+/** Rejections the user caused (a cancelled dialog) are not errors. */
+function cancelled(e: unknown): boolean {
+	return e instanceof VaultError && e.kind === "cancelled";
+}
 
 export interface FlatGroup {
 	id: GroupId;
@@ -61,7 +71,7 @@ export class AppState {
 	screen = $state<Screen>("unlock");
 	recents = $state<RecentFile[]>([]);
 	recentIndex = $state(0);
-	unlockError = $state<"wrongPassword" | "notFound" | null>(null);
+	unlockError = $state<UnlockError | null>(null);
 	createError = $state(false);
 	busy = $state<"unlock" | "create" | "save" | "benchmark" | null>(null);
 
@@ -80,6 +90,13 @@ export class AppState {
 	toast = $state<{ field: Field; secs: number } | null>(null);
 	banner = $state<"externalChange" | "saveFailed" | null>(null);
 	saveState = $state<"saved" | "saving" | "failed">("saved");
+	/**
+	 * The vault has changes that are not in the file: set by every change,
+	 * cleared only by a save that reached the disk. Independent of the editor.
+	 */
+	vaultDirty = $state(false);
+	/** The save in flight, if any: leaving waits for it. */
+	private saving: Promise<boolean> | null = null;
 
 	overlay = $state<Overlay>(null);
 	settingsTab = $state<SettingsTab>("general");
@@ -192,8 +209,13 @@ export class AppState {
 	}
 
 	async openOtherFile() {
-		const file = await this.api.vault.chooseFile();
-		if (!file) return;
+		let file: RecentFile;
+		try {
+			file = await this.api.vault.chooseFile();
+		} catch (e) {
+			if (!cancelled(e)) this.unlockError = "failed";
+			return;
+		}
 		this.session++;
 		const existing = this.recents.findIndex((r) => r.path === file.path);
 		if (existing >= 0) this.recentIndex = existing;
@@ -239,8 +261,15 @@ export class AppState {
 			await this.enterVault(info, session);
 		} catch (e) {
 			if (session !== this.session) return;
+			const kind = e instanceof VaultError ? e.kind : "io";
 			this.unlockError =
-				e instanceof VaultError && e.kind === "notFound" ? "notFound" : "wrongPassword";
+				kind === "wrongKey"
+					? "wrongPassword"
+					: kind === "notFound"
+						? "notFound"
+						: kind === "invalidFormat" || kind === "unsupportedVersion"
+							? "invalidFile"
+							: "failed";
 		} finally {
 			if (session === this.session) this.busy = null;
 		}
@@ -264,7 +293,7 @@ export class AppState {
 		name: string;
 		password: string;
 		cipher: Cipher;
-		kdf: KdfParams;
+		kdf: Argon2idParams;
 	}) {
 		if (this.busy) return;
 		const session = ++this.session;
@@ -274,8 +303,8 @@ export class AppState {
 			const info = await this.openSession(session, () => this.api.vault.create(options));
 			if (!info || session !== this.session) return;
 			this.recents = [
-				{ name: info.name, path: info.path, missing: false },
-				...this.recents.filter((r) => r.path !== info.path),
+				{ name: info.name, path: options.path, missing: false },
+				...this.recents.filter((r) => r.path !== options.path),
 			];
 			this.recentIndex = 0;
 			await this.enterVault(info, session);
@@ -293,6 +322,7 @@ export class AppState {
 		]);
 		if (session !== this.session) return;
 		this.db = info;
+		this.vaultDirty = info.dirty;
 		this.tree = tree;
 		this.entries = entries;
 		this.groupId = ALL;
@@ -327,6 +357,8 @@ export class AppState {
 		this.busy = null;
 		this.unlockError = null;
 		this.generated = "";
+		this.vaultDirty = false;
+		this.saveState = "saved";
 		void this.serialize(() => this.api.vault.lock());
 		this.screen = this.recents.length ? "unlock" : "welcome";
 	}
@@ -433,9 +465,14 @@ export class AppState {
 		const id = this.selectedId;
 		if (!id || this.screen !== "vault") return;
 		const session = this.session;
-		await this.api.vault.copyField(id, field);
+		let secs: number | null;
+		try {
+			secs = await this.api.vault.copyField(id, field);
+		} catch {
+			return;
+		}
 		if (session !== this.session) return;
-		this.toast = { field, secs: this.settings.clipboard_clear_secs };
+		this.toast = { field, secs: secs ?? this.settings.clipboard_clear_secs };
 		this.startToastTimer();
 	}
 
@@ -561,7 +598,7 @@ export class AppState {
 	async confirmDelete() {
 		const c = this.confirm;
 		this.confirm = null;
-		if (!c || c.kind === "leave") return;
+		if (!c || c.kind === "leave" || c.kind === "unsaved") return;
 		const session = this.session;
 		if (c.kind === "deleteEntry") {
 			await this.api.vault.deleteEntry(c.id);
@@ -631,45 +668,140 @@ export class AppState {
 	// ---------------------------------------------------------------- saving
 
 	/** Writes the file; true only if it was written for the current session. */
-	async persist(): Promise<boolean> {
-		if (!this.db) return false;
+	persist(overwrite = false): Promise<boolean> {
+		if (!this.db) return Promise.resolve(false);
+		this.vaultDirty = true;
+		const run = this.write(overwrite);
+		this.saving = run;
+		void run.finally(() => {
+			if (this.saving === run) this.saving = null;
+		});
+		return run;
+	}
+
+	private async write(overwrite: boolean): Promise<boolean> {
 		const session = this.session;
 		this.saveState = "saving";
 		try {
-			await this.api.vault.save();
+			const info = overwrite
+				? await this.api.vault.saveOverwrite()
+				: await this.api.vault.save();
 			if (session !== this.session) return false;
+			this.db = info;
+			this.vaultDirty = info.dirty;
 			this.saveState = "saved";
-			if (this.banner === "saveFailed") this.banner = null;
+			if (this.banner) this.banner = null;
 			return true;
-		} catch {
+		} catch (e) {
 			if (session !== this.session) return false;
 			this.saveState = "failed";
-			this.banner = "saveFailed";
+			const kind = e instanceof VaultError ? e.kind : "io";
+			if (kind === "notDurable") {
+				// Written and renamed, but not confirmed on disk: the state
+				// follows the file; the banner offers to write it again.
+				this.vaultDirty = false;
+				this.banner = "saveFailed";
+			} else {
+				this.banner = kind === "externalChange" ? "externalChange" : "saveFailed";
+			}
 			return false;
 		}
 	}
 
+	/** "Reload": the file as another app left it; unsaved changes are dropped. */
 	async reloadExternal() {
+		const session = this.session;
 		this.banner = null;
+		try {
+			const info = await this.api.vault.reload();
+			if (session !== this.session) return;
+			this.db = info;
+			this.vaultDirty = info.dirty;
+			this.saveState = "saved";
+		} catch {
+			if (session === this.session) this.banner = "saveFailed";
+			return;
+		}
+		this.closeEditor();
 		this.clearSelection();
-		await this.refresh(this.session);
+		await this.refresh(session);
 	}
 
+	/** "Keep mine": write over what the other app saved. */
 	async keepMine() {
 		this.banner = null;
-		await this.persist();
+		await this.persist(true);
+	}
+
+	/** Shows the banner if another app changed the file (window focus). */
+	async checkExternal() {
+		if (this.screen !== "vault" || this.banner) return;
+		const session = this.session;
+		const unchanged = await this.api.vault.checkFile().catch(() => true);
+		if (!unchanged && session === this.session && !this.banner) {
+			this.banner = "externalChange";
+		}
+	}
+
+	/**
+	 * Runs `action` once nothing would be lost: a modified editor is saved or
+	 * discarded, a save in flight finishes, and changes the last save could
+	 * not write are retried or discarded. Lock does not come through here.
+	 */
+	requestLeaveVault(action: () => void | Promise<void>) {
+		return this.requestLeave(async () => {
+			if (this.saving) await this.saving;
+			if (this.screen === "vault" && this.vaultDirty) {
+				this.confirm = { kind: "unsaved", action };
+				return;
+			}
+			await action();
+		});
+	}
+
+	async resolveUnsaved(choice: "retry" | "discard" | "cancel") {
+		const pending = this.confirm;
+		if (pending?.kind !== "unsaved") return;
+		this.confirm = null;
+		if (choice === "cancel") return;
+		if (choice === "retry" && !(await this.persist())) return;
+		await pending.action();
 	}
 
 	// ---------------------------------------------------------------- database settings
 
-	async updateDatabase(patch: Partial<Omit<DatabaseInfo, "path">>) {
+	async updateDatabase(patch: DatabasePatch) {
 		if (!this.db) return;
 		const session = this.session;
-		const info = await this.api.vault.updateDatabase(patch);
+		let info: DatabaseInfo;
+		try {
+			info = await this.api.vault.updateDatabase(patch);
+		} catch {
+			return;
+		}
 		if (session !== this.session) return;
 		this.db = info;
+		this.vaultDirty = true;
 		if (patch.name !== undefined) await this.refresh(session);
 		await this.persist();
+	}
+
+	/** New master password: used from the save that follows. */
+	async changeMasterPassword(password: string): Promise<boolean> {
+		if (!this.db || !password) return false;
+		const session = this.session;
+		try {
+			await this.api.vault.changeMasterPassword(password);
+		} catch {
+			return false;
+		}
+		if (session !== this.session) return false;
+		this.vaultDirty = true;
+		return this.persist();
+	}
+
+	async openUrl(url: string) {
+		await this.api.vault.openUrl(url).catch(() => {});
 	}
 
 	async benchmark(memoryMib: number, parallelism: number): Promise<number | null> {
@@ -769,21 +901,21 @@ export class AppState {
 		switch (id) {
 			case "new_database":
 				return inVault
-					? this.requestLeave(() => this.leaveVault("create"))
+					? this.requestLeaveVault(() => this.leaveVault("create"))
 					: this.startCreate();
 			case "open_database":
 				return inVault
-					? this.requestLeave(() => this.leaveVault("open"))
+					? this.requestLeaveVault(() => this.leaveVault("open"))
 					: this.openOtherFile();
 			case "close_database":
-				return inVault && this.requestLeave(() => this.lock());
+				return inVault && this.requestLeaveVault(() => this.lock());
 			case "save":
 				if (this.editor) return this.saveEditor();
 				return inVault && this.persist();
 			case "lock":
 				return inVault && this.lock();
 			case "quit":
-				return this.requestLeave(() => this.api.app.exit());
+				return this.requestLeaveVault(() => this.api.app.exit());
 			case "find":
 				if (!inVault) return;
 				this.overlay = null;
@@ -825,7 +957,10 @@ export class AppState {
 			case "about":
 				return this.openSettings("about");
 			case "demo_external_change":
-				if (this.isDemo && inVault) this.banner = "externalChange";
+				if (this.isDemo && inVault && "externalChange" in this.api.vault) {
+					(this.api.vault as { externalChange: boolean }).externalChange = true;
+					await this.checkExternal();
+				}
 				return;
 			case "demo_save_failure":
 				if (this.isDemo && "failNextSave" in this.api.vault) {

@@ -27,6 +27,9 @@
 		void app.init();
 		const onCopy = (event: ClipboardEvent) => app.handleCopy(event);
 		document.addEventListener("copy", onCopy);
+		// Back to Keyrust: did another app change the file meanwhile?
+		const onFocus = () => void app.checkExternal();
+		window.addEventListener("focus", onFocus);
 		let unlisten: (() => void) | undefined;
 		if (isTauri()) {
 			// Native menu clicks arrive as `menu` events carrying the command id.
@@ -38,6 +41,7 @@
 		}
 		return () => {
 			document.removeEventListener("copy", onCopy);
+			window.removeEventListener("focus", onFocus);
 			unlisten?.();
 		};
 	});

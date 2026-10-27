@@ -16,10 +16,10 @@ export interface EntryDetail {
 	summary: EntrySummary;
 	notes: string;
 	hasPassword: boolean;
-	/** ISO 8601 */
-	created: string;
-	/** ISO 8601 */
-	modified: string;
+	/** ISO 8601 (UTC), when known. */
+	created: string | null;
+	modified: string | null;
+	historyLen: number;
 }
 
 /** Editable copy of an entry, including its password: only for the editor. */
@@ -59,9 +59,23 @@ export interface StrengthEstimate {
 	bits: number;
 }
 
-export type Cipher = "aes256" | "chacha20";
+/** Twofish and "other" are read and preserved, never offered for new databases. */
+export type Cipher = "aes256" | "chaCha20" | "twofish" | "other";
 
-export interface KdfParams {
+/** The key derivation stored in the file, as it is (never converted silently). */
+export type KdfInfo =
+	| { kind: "aesKdf"; rounds: number }
+	| {
+			kind: "argon2";
+			variant: "argon2d" | "argon2id";
+			memoryBytes: number;
+			iterations: number;
+			parallelism: number;
+	  }
+	| { kind: "other" };
+
+/** Argon2id parameters Keyrust creates and edits. */
+export interface Argon2idParams {
 	memoryMib: number;
 	iterations: number;
 	parallelism: number;
@@ -69,10 +83,13 @@ export interface KdfParams {
 
 export interface DatabaseInfo {
 	name: string;
-	path: string;
 	cipher: Cipher;
-	kdf: KdfParams;
+	kdf: KdfInfo;
 	recycleBin: boolean;
+	/** KDBX version on disk, e.g. [4, 1]. */
+	version: [number, number];
+	/** Changes in memory that are not in the file yet. */
+	dirty: boolean;
 }
 
 export interface RecentFile {
@@ -86,7 +103,14 @@ export interface CreateOptions {
 	name: string;
 	password: string;
 	cipher: Cipher;
-	kdf: KdfParams;
+	kdf: Argon2idParams;
+}
+
+export interface DatabasePatch {
+	name?: string;
+	cipher?: Cipher;
+	recycleBin?: boolean;
+	kdf?: Argon2idParams;
 }
 
 /** `keyrust_core::settings::Settings`, as serialised by the Tauri commands. */

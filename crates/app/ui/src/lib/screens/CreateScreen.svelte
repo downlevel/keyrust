@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onMount } from "svelte";
+	import { VaultError } from "$lib/api";
 	import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 	import Check from "@lucide/svelte/icons/check";
 	import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -14,7 +16,7 @@
 
 	const app = useApp();
 
-	let path = $state("~/Documents/Personal.kdbx");
+	let path = $state("");
 	let name = $state("Personal");
 	let password = $state("");
 	let confirm = $state("");
@@ -37,11 +39,19 @@
 
 	const creating = $derived(app.busy === "create");
 	const matches = $derived(confirm.length > 0 && confirm === password);
-	const canSubmit = $derived(!!name.trim() && !!password && matches && !creating);
+	const canSubmit = $derived(!!path && !!name.trim() && !!password && matches && !creating);
+
+	// New databases get Argon2id iterations measured on this computer (~1 s).
+	onMount(() => {
+		void benchmark();
+	});
 
 	async function choose() {
-		const file = await app.api.vault.chooseFile();
-		if (file) path = file.path;
+		try {
+			path = (await app.api.vault.chooseNewPath(name)).path;
+		} catch (e) {
+			if (!(e instanceof VaultError && e.kind === "cancelled")) app.createError = true;
+		}
 	}
 
 	async function benchmark() {
@@ -104,6 +114,7 @@
 						id="create-file"
 						class="{input} min-w-0 flex-1 bg-surface text-foreground/80"
 						value={path}
+						placeholder={m.create_no_file()}
 						readonly
 					/>
 					<Button type="button" variant="outline" class="h-[38px]" onclick={choose}
@@ -178,7 +189,7 @@
 								>{m.cipher_label()}
 								<select class={small} bind:value={cipher}>
 									<option value="aes256">{m.cipher_aes()}</option>
-									<option value="chacha20">{m.cipher_chacha()}</option>
+									<option value="chaCha20">{m.cipher_chacha()}</option>
 								</select>
 							</label>
 							<label class="flex flex-col gap-1 text-[13px]"

@@ -89,7 +89,7 @@
 					>{app.db?.name}</span
 				>
 			{/if}
-			{#if app.editorDirty}<UnsavedDot />{/if}
+			{#if app.editorDirty || app.vaultDirty}<UnsavedDot />{/if}
 			<button
 				type="button"
 				class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"

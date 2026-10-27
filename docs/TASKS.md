@@ -47,13 +47,13 @@
 - [x] Calibrazione e modifica parametri Argon2id; cambio master password
 
 ### app (Tauri + Svelte)
-- [ ] Comandi IPC: unlock, create, save, lock, list_groups, list_entries (solo `EntrySummary`), get_entry, reveal_field, update_entry, delete, search, generate
-- [ ] `copy_field` lato Rust con `arboard`: auto-clear dopo N s solo se il contenuto è invariato, hint di esclusione cronologia, clear al lock/uscita
+- [x] Comandi IPC: unlock, create, save, lock, list_groups, list_entries (solo `EntrySummary`), get_entry, reveal_field, update_entry, delete, search, generate
+- [x] `copy_field` lato Rust con `arboard`: auto-clear dopo N s solo se il contenuto è invariato, hint di esclusione cronologia, clear al lock/uscita
 - [ ] Auto-lock per inattività (timer resettato dall'input)
 - [ ] Auto-lock al blocco schermo: Linux (D-Bus logind/ScreenSaver), Windows (WTS session notification), macOS (`com.apple.screenIsLocked`)
 - [ ] Lock opzionale alla minimizzazione
-- [ ] Schermate: Welcome/Unlock con file recenti, wizard Create database, Vault, Entry editor, Generator popover, Settings
-- [ ] Indicatore "unsaved changes" e salvataggio (Ctrl+S)
+- [x] Schermate: Welcome/Unlock con file recenti, wizard Create database, Vault, Entry editor, Generator popover, Settings
+- [x] Indicatore "unsaved changes" e salvataggio (Ctrl+S)
 
 ### Compatibilità e sicurezza
 - [x] Test KeePassXC → Keyrust: apertura di tutte le fixture con verifica del contenuto atteso

@@ -20,7 +20,11 @@
 			? m.unlock_error_wrong()
 			: app.unlockError === "notFound"
 				? m.unlock_error_not_found()
-				: "",
+				: app.unlockError === "invalidFile"
+					? m.unlock_error_invalid_file()
+					: app.unlockError === "failed"
+						? m.unlock_error_failed()
+						: "",
 	);
 
 	async function submit(event: SubmitEvent) {

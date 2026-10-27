@@ -275,3 +275,50 @@ describe("settings", () => {
 		await waitFor(() => expect(field).toHaveValue(5));
 	});
 });
+
+describe("database settings (milestone 3b)", () => {
+	it("an AES-KDF database offers to switch to Argon2id instead of editing", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const realUnlock = vault.unlock.bind(vault);
+		vault.unlock = async (path, password) => ({
+			...(await realUnlock(path, password)),
+			kdf: { kind: "aesKdf", rounds: 60000 },
+		});
+		const update = vi.spyOn(vault, "updateDatabase");
+		const user = userEvent.setup();
+		render(App, { apis: { vault, app: new MemoryAppApi() } });
+		await unlock(user);
+		await screen.findByRole("listbox", { name: "Entries" });
+		await user.keyboard("{Control>}k{/Control}");
+		await user.type(await screen.findByRole("combobox"), "Database Settings");
+		await user.keyboard("{Enter}");
+		await user.click(await screen.findByRole("button", { name: /Advanced: key derivation/ }));
+		expect(screen.getByTestId("kdf-current")).toHaveTextContent("AES-KDF, 60000 rounds");
+		expect(screen.queryByLabelText(/Memory/)).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Switch to Argon2id" }));
+		await waitFor(() =>
+			expect(update).toHaveBeenCalledWith({
+				kdf: { memoryMib: 64, iterations: expect.any(Number), parallelism: 2 },
+			}),
+		);
+	});
+
+	it("the master password changes only with a matching confirmation", async () => {
+		const { user, vault } = await openVault();
+		const change = vi.spyOn(vault, "changeMasterPassword");
+		await user.keyboard("{Control>}k{/Control}");
+		await user.type(await screen.findByRole("combobox"), "Database Settings");
+		await user.keyboard("{Enter}");
+		await user.click(await screen.findByRole("button", { name: "Change master password…" }));
+		const dialog = await screen.findByRole("dialog", { name: "Change master password" });
+		await user.type(within(dialog).getByLabelText("New master password"), "correct horse");
+		await user.type(
+			within(dialog).getByLabelText("Confirm new master password"),
+			"correct hors",
+		);
+		expect(within(dialog).getByRole("button", { name: "Change password" })).toBeDisabled();
+		await user.type(within(dialog).getByLabelText("Confirm new master password"), "e");
+		await user.click(within(dialog).getByRole("button", { name: "Change password" }));
+		await waitFor(() => expect(change).toHaveBeenCalledWith("correct horse"));
+	});
+});

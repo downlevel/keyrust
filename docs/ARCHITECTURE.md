@@ -70,6 +70,10 @@ keyrust/
   (`copy_field(entry_id, field)`), quindi la password non passa nemmeno dal webview.
 - **La master password** è passata dal form di sblocco a `unlock` come `SecretString`, poi azzerata;
   il campo input viene svuotato subito dopo l'invio.
+- **Plugin chiamati solo dal Rust**: `tauri-plugin-dialog` (dialoghi file) e `tauri-plugin-opener` (URL http/https
+  validati) sono registrati ma nessuna capability ne concede i permessi al webview; lo script dell'opener che
+  intercetta i link è disattivato. I percorsi arrivano a `unlock`/`create` solo dai dialoghi o dai file recenti
+  (allowlist nel backend). Comandi IPC in `crates/app/src/commands.rs`; appunti in `crates/app/src/clipboard.rs`.
 - **Tauri capabilities minime**: nessun accesso FS/shell dal frontend; dialoghi file e operazioni su disco
   passano da comandi Rust dedicati. CSP restrittiva, nessuna risorsa remota.
 

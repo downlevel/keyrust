@@ -273,12 +273,13 @@ describe("inspection regressions", () => {
 	it("Lock during Save cancels the pending transition (M2-I02)", async () => {
 		const { app, vault } = await dirty();
 		await app.selectEntry("gitlab");
-		const late = deferred<void>();
+		const late = deferred<Awaited<ReturnType<DemoVault["save"]>>>();
+		const info = await vault.databaseInfo();
 		vault.save = () => late.promise;
 		const pending = app.resolveLeave("save");
 		await new Promise((r) => setTimeout(r, 0));
 		app.lock();
-		late.resolve();
+		late.resolve(info);
 		await pending;
 		expect(app.screen).toBe("unlock");
 		expect(app.selectedId).toBeNull();
@@ -394,5 +395,113 @@ describe("second inspection regressions", () => {
 		answers[1]();
 		await b;
 		expect(app.settings).toMatchObject({ clipboard_clear_secs: 30, lock_on_minimize: true });
+	});
+});
+
+describe("unsaved vault changes (milestone 3b)", () => {
+	async function failingSave(kind: "externalChange" | "io") {
+		const ctx = await unlocked();
+		const exit = vi.spyOn(ctx.app.api.app, "exit").mockResolvedValue();
+		if (kind === "externalChange") ctx.vault.externalChange = true;
+		else ctx.vault.failNextSave = true;
+		return { ...ctx, exit };
+	}
+
+	it("a failed save after an entry change guards Quit: cancel, discard", async () => {
+		const { app, exit } = await failingSave("io");
+		await app.selectEntry("github");
+		app.askDeleteEntry();
+		await app.confirmDelete();
+		expect(app.vaultDirty).toBe(true);
+		expect(app.banner).toBe("saveFailed");
+		await app.run("quit");
+		expect(app.confirm?.kind).toBe("unsaved");
+		await app.resolveUnsaved("cancel");
+		expect(exit).not.toHaveBeenCalled();
+		await app.run("quit");
+		await app.resolveUnsaved("discard");
+		expect(exit).toHaveBeenCalledOnce();
+	});
+
+	it("Retry save continues only when the save succeeds", async () => {
+		const { app, vault, exit } = await failingSave("externalChange");
+		await app.createGroup("Travel");
+		expect(app.banner).toBe("externalChange");
+		await app.run("close_database");
+		expect(app.confirm?.kind).toBe("unsaved");
+		await app.resolveUnsaved("retry");
+		expect(app.screen).toBe("vault");
+		vault.externalChange = false;
+		await app.run("close_database");
+		await app.resolveUnsaved("retry");
+		expect(app.screen).toBe("unlock");
+		expect(exit).not.toHaveBeenCalled();
+	});
+
+	it("a failed save after a database setting guards opening another file", async () => {
+		const { app } = await failingSave("io");
+		await app.updateDatabase({ name: "Renamed" });
+		await app.run("open_database");
+		expect(app.confirm?.kind).toBe("unsaved");
+	});
+
+	it("leaving waits for a save in flight", async () => {
+		const { app, vault } = await unlocked();
+		const exit = vi.spyOn(app.api.app, "exit").mockResolvedValue();
+		const late = deferred<Awaited<ReturnType<DemoVault["save"]>>>();
+		const info = await vault.databaseInfo();
+		vault.save = () => late.promise;
+		const saving = app.persist();
+		const quitting = app.run("quit");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(exit).not.toHaveBeenCalled();
+		late.resolve({ ...info, dirty: false });
+		await saving;
+		await quitting;
+		expect(exit).toHaveBeenCalledOnce();
+	});
+
+	it("Keep mine overwrites, Reload drops unsaved changes", async () => {
+		const { app, vault } = await failingSave("externalChange");
+		await app.createGroup("Mine");
+		expect(app.banner).toBe("externalChange");
+		await app.keepMine();
+		expect(app.banner).toBeNull();
+		expect(app.vaultDirty).toBe(false);
+
+		vault.externalChange = true;
+		await app.createGroup("Lost");
+		await app.reloadExternal();
+		expect(app.banner).toBeNull();
+		expect(app.vaultDirty).toBe(false);
+		expect(app.groups.some((g) => g.name === "Lost")).toBe(false);
+	});
+
+	it("coming back to the window shows a change made by another app", async () => {
+		const { app, vault } = await unlocked();
+		await app.checkExternal();
+		expect(app.banner).toBeNull();
+		vault.externalChange = true;
+		await app.checkExternal();
+		expect(app.banner).toBe("externalChange");
+	});
+
+	it("Lock never asks, even with unsaved changes", async () => {
+		const { app } = await failingSave("io");
+		await app.createGroup("Unsaved");
+		app.lock();
+		expect(app.confirm).toBeNull();
+		expect(app.vaultDirty).toBe(false);
+		expect(app.screen).toBe("unlock");
+	});
+
+	it("a new master password is saved straight away", async () => {
+		const { app, vault } = await unlocked();
+		const change = vi.spyOn(vault, "changeMasterPassword");
+		const save = vi.spyOn(vault, "save");
+		expect(await app.changeMasterPassword("brand-new")).toBe(true);
+		expect(change).toHaveBeenCalledWith("brand-new");
+		expect(save).toHaveBeenCalled();
+		expect(app.vaultDirty).toBe(false);
 	});
 });
