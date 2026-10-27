@@ -163,3 +163,6 @@
 
 - Esito finale: APPROVED. Dopo l'ispezione è stato modificato solo questo log (append dell'esito); nessun file di codice o di piano.
 - Round usati: plan review 2/5, ispezioni 2/2, fix round 1/2.
+
+## Post-ispezione (2026-10-27)
+- Owner GitHub reale: `downlevel`. Aggiornati `Cargo.toml` (repository) e `tauri.conf.json` (identifier `io.github.downlevel.keyrust`). Modifica di sola configurazione dopo l'ispezione 2, non ispezionata da Codex; il piano conserva il valore originale previsto.

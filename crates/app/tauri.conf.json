@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Keyrust",
   "mainBinaryName": "keyrust",
-  "identifier": "io.github.maurogiulivi.keyrust",
+  "identifier": "io.github.downlevel.keyrust",
   "build": {
     "beforeDevCommand": { "script": "pnpm dev", "cwd": "ui" },
     "beforeBuildCommand": { "script": "pnpm build", "cwd": "ui" },

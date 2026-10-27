@@ -11,7 +11,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"
 authors = ["Mauro Giulivi"]
-repository = "https://github.com/maurogiulivi/keyrust"
+repository = "https://github.com/downlevel/keyrust"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
