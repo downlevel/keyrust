@@ -48,5 +48,5 @@
     dell'editor, sidebar e palette; la demo ora elimina i gruppi come il core.
   - **M3B-R03** le password digitate nel dialog restavano nel componente dopo il Lock → azzerate appena il dialog non è più
     aperto (qualunque sia il motivo); un completamento dopo il Lock non riapre le impostazioni.
-- Frontend 156/156; clipboard 8/8 con i lint del progetto.
+- Frontend 156/156; clipboard 8/8 con i lint del progetto. CI su 8ced554: run 40600000176 success su tutti gli 8 job.
 - **Budget di ispezione esaurito** (MAX_INSPECTION_ROUNDS=2): queste correzioni non sono state ispezionate da Codex.
