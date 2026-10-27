@@ -36,7 +36,7 @@
 
 	const groupOptions = $derived(
 		app.groups
-			.filter((g) => !g.isRecycleBin)
+			.filter((g) => !g.isRecycleBin && !g.inRecycleBin)
 			.map((g) => ({ id: g.id, label: `${" ".repeat(g.depth + 1)}${g.name}` })),
 	);
 

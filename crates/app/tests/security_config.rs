@@ -1,5 +1,6 @@
-//! Guards the Tauri security configuration: minimal capabilities, no plugins,
-//! a strict production CSP and a known set of IPC commands.
+//! Guards the Tauri security configuration: minimal capabilities, only the
+//! dialog and opener plugins (called from Rust, no webview permission), a
+//! strict production CSP and a known set of IPC commands.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -32,17 +33,34 @@ fn only_the_default_capability_with_core_default_exists() {
 }
 
 #[test]
-fn no_plugins_are_configured() {
+fn only_the_dialog_and_opener_plugins_without_webview_permissions() {
     let conf = read_json("tauri.conf.json");
     let plugins = conf.get("plugins").and_then(Value::as_object);
     assert!(plugins.is_none_or(|p| p.is_empty()), "plugins: {plugins:?}");
 
     let manifest =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+    let mut deps: Vec<&str> = manifest
+        .lines()
+        .filter_map(|l| l.trim().split_once(" = ").map(|(k, _)| k))
+        .filter(|k| k.starts_with("tauri-plugin-"))
+        .collect();
+    deps.sort();
+    assert_eq!(deps, ["tauri-plugin-dialog", "tauri-plugin-opener"]);
+
+    // No capability grants any plugin permission (only core:default exists).
+    let capability = read_json("capabilities/default.json");
+    let permissions = capability["permissions"].as_array().unwrap();
     assert!(
-        !manifest.contains("tauri-plugin-"),
-        "a Tauri plugin dependency was added"
+        permissions
+            .iter()
+            .all(|p| p.as_str().is_some_and(|p| p.starts_with("core:"))),
+        "{permissions:?}"
     );
+
+    // The opener's link-click script is disabled: links go through open_url.
+    let lib = include_str!("../src/lib.rs");
+    assert!(lib.contains(".open_js_links_on_click(false)"));
 }
 
 #[test]
@@ -77,9 +95,44 @@ fn production_csp_is_strict() {
 
 #[test]
 fn ipc_commands_are_the_expected_ones() {
+    // Every command the webview can call; a new one must be added here on purpose.
     assert_eq!(
         keyrust_app_lib::COMMANDS,
-        ["app_info", "get_settings", "update_settings", "exit_app"]
+        [
+            "app_info",
+            "get_settings",
+            "update_settings",
+            "exit_app",
+            "recent_files",
+            "choose_database_file",
+            "choose_new_database_path",
+            "unlock",
+            "create",
+            "lock_vault",
+            "database_info",
+            "tree",
+            "list_entries",
+            "get_entry",
+            "get_entry_for_edit",
+            "reveal_field",
+            "copy_field",
+            "save_entry",
+            "delete_entry",
+            "restore_entry",
+            "create_group",
+            "rename_group",
+            "delete_group",
+            "update_database",
+            "change_master_password",
+            "save",
+            "save_overwrite",
+            "reload",
+            "check_file",
+            "generate_password",
+            "estimate_strength",
+            "benchmark_kdf",
+            "open_url",
+        ]
     );
     let source = include_str!("../src/lib.rs");
     let handler = source

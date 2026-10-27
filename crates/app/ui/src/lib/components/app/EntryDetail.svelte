@@ -44,7 +44,8 @@
 		month: "short",
 		year: "numeric",
 	});
-	const date = (iso: string) => {
+	const date = (iso: string | null) => {
+		if (!iso) return m.no_value();
 		const d = new Date(iso);
 		return Number.isNaN(d.getTime()) ? iso : dateFormat.format(d);
 	};
@@ -170,7 +171,11 @@
 						target="_blank"
 						rel="noopener noreferrer"
 						class="block truncate text-primary hover:text-primary-hover"
-						onclick={(e) => app.isDemo && e.preventDefault()}>{entry.url}</a
+						onclick={(e) => {
+							// The system browser opens it, via the backend.
+							e.preventDefault();
+							if (safeUrl) void app.openUrl(safeUrl);
+						}}>{entry.url}</a
 					>
 					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				{:else}

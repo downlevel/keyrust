@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "$lib/api/app";
 import {
 	VaultError,
+	type VaultErrorKind,
 	type Apis,
 	type AppInfo,
 	type Cipher,
@@ -13,7 +14,8 @@ import {
 	type GeneratorOptions,
 	type GroupId,
 	type GroupNode,
-	type KdfParams,
+	type Argon2idParams,
+	type DatabasePatch,
 	type RecentFile,
 	type Settings,
 } from "$lib/api";
@@ -41,7 +43,16 @@ export interface EditorState {
 export type Confirm =
 	| { kind: "deleteEntry"; id: EntryId; title: string; permanent: boolean }
 	| { kind: "deleteGroup"; id: GroupId; name: string }
-	| { kind: "leave"; action: () => void | Promise<void> };
+	| { kind: "leave"; action: () => void | Promise<void> }
+	/** The vault has changes the last save could not write. */
+	| { kind: "unsaved"; action: () => void | Promise<void> };
+
+export type UnlockError = "wrongPassword" | "notFound" | "invalidFile" | "failed";
+
+/** Rejections the user caused (a cancelled dialog) are not errors. */
+function cancelled(e: unknown): boolean {
+	return e instanceof VaultError && e.kind === "cancelled";
+}
 
 export interface FlatGroup {
 	id: GroupId;
@@ -49,6 +60,8 @@ export interface FlatGroup {
 	depth: number;
 	count: number;
 	isRecycleBin: boolean;
+	/** A group deleted into the recycle bin (a descendant of it). */
+	inRecycleBin: boolean;
 }
 
 /**
@@ -61,7 +74,7 @@ export class AppState {
 	screen = $state<Screen>("unlock");
 	recents = $state<RecentFile[]>([]);
 	recentIndex = $state(0);
-	unlockError = $state<"wrongPassword" | "notFound" | null>(null);
+	unlockError = $state<UnlockError | null>(null);
 	createError = $state(false);
 	busy = $state<"unlock" | "create" | "save" | "benchmark" | null>(null);
 
@@ -80,6 +93,19 @@ export class AppState {
 	toast = $state<{ field: Field; secs: number } | null>(null);
 	banner = $state<"externalChange" | "saveFailed" | null>(null);
 	saveState = $state<"saved" | "saving" | "failed">("saved");
+	/**
+	 * The vault has changes that are not in the file: set by every change,
+	 * cleared only by a save that reached the disk. Independent of the editor.
+	 */
+	vaultDirty = $state(false);
+	/** The save in flight, if any: leaving waits for it. */
+	private saving: Promise<boolean> | null = null;
+	/** Vault changes in flight (mutation, refresh, save): leaving waits for them. */
+	// Bookkeeping only, never rendered: deliberately not reactive.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	private pending = new Set<Promise<unknown>>();
+	/** Why the last save failed, if it did. */
+	lastSaveError: VaultErrorKind | null = null;
 
 	overlay = $state<Overlay>(null);
 	settingsTab = $state<SettingsTab>("general");
@@ -120,7 +146,7 @@ export class AppState {
 
 	readonly groups: FlatGroup[] = $derived.by(() => {
 		const out: FlatGroup[] = [];
-		const walk = (node: GroupNode, depth: number) => {
+		const walk = (node: GroupNode, depth: number, recycled: boolean) => {
 			for (const child of node.children) {
 				out.push({
 					id: child.id,
@@ -128,11 +154,12 @@ export class AppState {
 					depth,
 					count: this.entries.filter((e) => e.groupId === child.id).length,
 					isRecycleBin: child.isRecycleBin,
+					inRecycleBin: recycled,
 				});
-				walk(child, depth + 1);
+				walk(child, depth + 1, recycled || child.isRecycleBin);
 			}
 		};
-		if (this.tree) walk(this.tree, 0);
+		if (this.tree) walk(this.tree, 0, false);
 		return out;
 	});
 
@@ -140,15 +167,31 @@ export class AppState {
 	readonly rootId = $derived(this.tree?.id ?? "");
 	readonly recycleBinId = $derived(this.tree?.children.find((c) => c.isRecycleBin)?.id ?? null);
 
-	readonly liveCount = $derived(
-		this.entries.filter((e) => e.groupId !== this.recycleBinId).length,
+	/**
+	 * The recycle bin and every group inside it: deleting a group moves it
+	 * there whole, so its entries stay in their own group.
+	 */
+	readonly recycledGroups: ReadonlySet<GroupId> = $derived(
+		// Rebuilt by the derivation, never mutated: no need for a SvelteSet.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		new Set(this.groups.filter((g) => g.isRecycleBin || g.inRecycleBin).map((g) => g.id)),
 	);
+
+	isRecycled(groupId: GroupId): boolean {
+		return this.recycledGroups.has(groupId);
+	}
+
+	readonly liveCount = $derived(this.entries.filter((e) => !this.isRecycled(e.groupId)).length);
 
 	readonly visibleEntries: EntrySummary[] = $derived.by(() => {
 		const q = this.query.trim().toLowerCase();
 		return this.entries
 			.filter((e) =>
-				this.groupId === ALL ? e.groupId !== this.recycleBinId : e.groupId === this.groupId,
+				this.groupId === ALL
+					? !this.isRecycled(e.groupId)
+					: this.groupId === this.recycleBinId
+						? this.isRecycled(e.groupId)
+						: e.groupId === this.groupId,
 			)
 			.filter((e) => !q || `${e.title} ${e.username} ${e.url}`.toLowerCase().includes(q))
 			.sort((a, b) => a.title.localeCompare(b.title));
@@ -162,7 +205,7 @@ export class AppState {
 		!!this.editor && JSON.stringify(this.editor.draft) !== JSON.stringify(this.editor.original),
 	);
 
-	readonly inRecycleBin = $derived(this.selected?.groupId === this.recycleBinId);
+	readonly inRecycleBin = $derived(!!this.selected && this.isRecycled(this.selected.groupId));
 
 	// ---------------------------------------------------------------- start
 
@@ -192,8 +235,13 @@ export class AppState {
 	}
 
 	async openOtherFile() {
-		const file = await this.api.vault.chooseFile();
-		if (!file) return;
+		let file: RecentFile;
+		try {
+			file = await this.api.vault.chooseFile();
+		} catch (e) {
+			if (!cancelled(e)) this.unlockError = "failed";
+			return;
+		}
 		this.session++;
 		const existing = this.recents.findIndex((r) => r.path === file.path);
 		if (existing >= 0) this.recentIndex = existing;
@@ -239,8 +287,15 @@ export class AppState {
 			await this.enterVault(info, session);
 		} catch (e) {
 			if (session !== this.session) return;
+			const kind = e instanceof VaultError ? e.kind : "io";
 			this.unlockError =
-				e instanceof VaultError && e.kind === "notFound" ? "notFound" : "wrongPassword";
+				kind === "wrongKey"
+					? "wrongPassword"
+					: kind === "notFound"
+						? "notFound"
+						: kind === "invalidFormat" || kind === "unsupportedVersion"
+							? "invalidFile"
+							: "failed";
 		} finally {
 			if (session === this.session) this.busy = null;
 		}
@@ -264,7 +319,7 @@ export class AppState {
 		name: string;
 		password: string;
 		cipher: Cipher;
-		kdf: KdfParams;
+		kdf: Argon2idParams;
 	}) {
 		if (this.busy) return;
 		const session = ++this.session;
@@ -274,8 +329,8 @@ export class AppState {
 			const info = await this.openSession(session, () => this.api.vault.create(options));
 			if (!info || session !== this.session) return;
 			this.recents = [
-				{ name: info.name, path: info.path, missing: false },
-				...this.recents.filter((r) => r.path !== info.path),
+				{ name: info.name, path: options.path, missing: false },
+				...this.recents.filter((r) => r.path !== options.path),
 			];
 			this.recentIndex = 0;
 			await this.enterVault(info, session);
@@ -293,6 +348,7 @@ export class AppState {
 		]);
 		if (session !== this.session) return;
 		this.db = info;
+		this.vaultDirty = info.dirty;
 		this.tree = tree;
 		this.entries = entries;
 		this.groupId = ALL;
@@ -327,6 +383,8 @@ export class AppState {
 		this.busy = null;
 		this.unlockError = null;
 		this.generated = "";
+		this.vaultDirty = false;
+		this.saveState = "saved";
 		void this.serialize(() => this.api.vault.lock());
 		this.screen = this.recents.length ? "unlock" : "welcome";
 	}
@@ -433,9 +491,14 @@ export class AppState {
 		const id = this.selectedId;
 		if (!id || this.screen !== "vault") return;
 		const session = this.session;
-		await this.api.vault.copyField(id, field);
+		let secs: number | null;
+		try {
+			secs = await this.api.vault.copyField(id, field);
+		} catch {
+			return;
+		}
 		if (session !== this.session) return;
-		this.toast = { field, secs: this.settings.clipboard_clear_secs };
+		this.toast = { field, secs: secs ?? this.settings.clipboard_clear_secs };
 		this.startToastTimer();
 	}
 
@@ -459,7 +522,7 @@ export class AppState {
 	// ---------------------------------------------------------------- editor
 
 	private defaultGroup(): GroupId {
-		if (this.groupId !== ALL && this.groupId !== this.recycleBinId) return this.groupId;
+		if (this.groupId !== ALL && !this.isRecycled(this.groupId)) return this.groupId;
 		return this.groups.find((g) => !g.isRecycleBin)?.id ?? this.rootId;
 	}
 
@@ -510,10 +573,43 @@ export class AppState {
 		if (!editor || !editor.draft.title.trim() || this.savingEntry) return false;
 		this.savingEntry = true;
 		try {
-			return await this.saveEditorOnce(editor);
+			return await this.track(this.saveEditorOnce(editor));
 		} finally {
 			this.savingEntry = false;
 		}
+	}
+
+	/**
+	 * Registers vault work so that leaving waits for it. The vault counts as
+	 * changed from the start: until the backend says otherwise (a save, or
+	 * `databaseInfo` when leaving), nothing is assumed written.
+	 */
+	private track<T>(work: Promise<T>): Promise<T> {
+		this.vaultDirty = true;
+		this.pending.add(work);
+		void work.then(
+			() => this.pending.delete(work),
+			() => this.pending.delete(work),
+		);
+		return work;
+	}
+
+	/** A change: the backend call, a refresh of the lists, then the save. */
+	private change(op: (session: number) => Promise<unknown>): Promise<boolean> {
+		return this.track(
+			(async () => {
+				const session = this.session;
+				try {
+					await op(session);
+				} catch {
+					return false;
+				}
+				// A failed refresh must not skip the save.
+				await this.refresh(session).catch(() => {});
+				if (session !== this.session) return false;
+				return this.persist();
+			})(),
+		);
 	}
 
 	private async saveEditorOnce(editor: EditorState): Promise<boolean> {
@@ -521,6 +617,7 @@ export class AppState {
 		const selection = this.selection;
 		let id: EntryId;
 		try {
+			this.vaultDirty = true;
 			id = await this.api.vault.saveEntry({
 				...editor.draft,
 				title: editor.draft.title.trim(),
@@ -533,7 +630,7 @@ export class AppState {
 		this.editor = null;
 		this.generated = "";
 		if (this.overlay === "generator") this.overlay = null;
-		await this.refresh(session);
+		await this.refresh(session).catch(() => {});
 		if (session !== this.session) return false;
 		// Show the saved entry unless the user has moved on meanwhile.
 		if (after === this.selection) {
@@ -554,45 +651,41 @@ export class AppState {
 			kind: "deleteEntry",
 			id: e.id,
 			title: e.title,
-			permanent: e.groupId === this.recycleBinId || !this.db?.recycleBin,
+			permanent: this.isRecycled(e.groupId) || !this.db?.recycleBin,
 		};
 	}
 
 	async confirmDelete() {
 		const c = this.confirm;
 		this.confirm = null;
-		if (!c || c.kind === "leave") return;
-		const session = this.session;
-		if (c.kind === "deleteEntry") {
-			await this.api.vault.deleteEntry(c.id);
-			if (this.selectedId === c.id) this.clearSelection();
-		} else {
-			await this.api.vault.deleteGroup(c.id);
-			if (this.groupId === c.id) this.groupId = ALL;
-		}
-		await this.refresh(session);
-		await this.persist();
+		if (!c || c.kind === "leave" || c.kind === "unsaved") return;
+		await this.change(async () => {
+			if (c.kind === "deleteEntry") {
+				await this.api.vault.deleteEntry(c.id);
+				if (this.selectedId === c.id) this.clearSelection();
+			} else {
+				await this.api.vault.deleteGroup(c.id);
+				if (this.groupId === c.id) this.groupId = ALL;
+			}
+		});
 	}
 
 	async restoreSelected() {
 		const id = this.selectedId;
 		if (!id || !this.inRecycleBin) return;
-		const session = this.session;
-		await this.api.vault.restoreEntry(id);
-		await this.refresh(session);
-		await this.persist();
+		await this.change(() => this.api.vault.restoreEntry(id));
 	}
 
 	async createGroup(name: string) {
 		if (!name.trim() || !this.db) return;
-		const session = this.session;
 		const parent =
-			this.groupId === ALL || this.groupId === this.recycleBinId ? this.rootId : this.groupId;
-		const id = await this.api.vault.createGroup(parent, name);
-		await this.refresh(session);
-		if (session !== this.session) return;
-		await this.selectGroup(id);
-		await this.persist();
+			this.groupId === ALL || this.isRecycled(this.groupId) ? this.rootId : this.groupId;
+		let created: GroupId | null = null;
+		const session = this.session;
+		await this.change(async () => {
+			created = await this.api.vault.createGroup(parent, name);
+		});
+		if (created && session === this.session) await this.selectGroup(created);
 	}
 
 	startRenameGroup(id = this.groupId) {
@@ -604,10 +697,7 @@ export class AppState {
 		this.renamingGroupId = null;
 		const g = this.groups.find((x) => x.id === id);
 		if (!g || !name.trim() || name.trim() === g.name) return;
-		const session = this.session;
-		await this.api.vault.renameGroup(id, name);
-		await this.refresh(session);
-		await this.persist();
+		await this.change(() => this.api.vault.renameGroup(id, name));
 	}
 
 	askDeleteGroup(id = this.groupId) {
@@ -631,45 +721,162 @@ export class AppState {
 	// ---------------------------------------------------------------- saving
 
 	/** Writes the file; true only if it was written for the current session. */
-	async persist(): Promise<boolean> {
-		if (!this.db) return false;
+	persist(overwrite = false): Promise<boolean> {
+		if (!this.db) return Promise.resolve(false);
+		this.vaultDirty = true;
+		const run = this.write(overwrite);
+		this.saving = run;
+		void run.finally(() => {
+			if (this.saving === run) this.saving = null;
+		});
+		return run;
+	}
+
+	private async write(overwrite: boolean): Promise<boolean> {
 		const session = this.session;
 		this.saveState = "saving";
+		this.lastSaveError = null;
 		try {
-			await this.api.vault.save();
+			const info = overwrite
+				? await this.api.vault.saveOverwrite()
+				: await this.api.vault.save();
 			if (session !== this.session) return false;
+			this.db = info;
+			this.vaultDirty = info.dirty;
 			this.saveState = "saved";
-			if (this.banner === "saveFailed") this.banner = null;
+			if (this.banner) this.banner = null;
 			return true;
-		} catch {
+		} catch (e) {
 			if (session !== this.session) return false;
 			this.saveState = "failed";
-			this.banner = "saveFailed";
+			const kind = e instanceof VaultError ? e.kind : "io";
+			this.lastSaveError = kind;
+			if (kind === "notDurable") {
+				// Written and renamed, but not confirmed on disk: the state
+				// follows the file; the banner offers to write it again.
+				this.vaultDirty = false;
+				this.banner = "saveFailed";
+			} else {
+				this.banner = kind === "externalChange" ? "externalChange" : "saveFailed";
+			}
 			return false;
 		}
 	}
 
+	/** "Reload": the file as another app left it; unsaved changes are dropped. */
 	async reloadExternal() {
+		const session = this.session;
 		this.banner = null;
+		try {
+			const info = await this.api.vault.reload();
+			if (session !== this.session) return;
+			this.db = info;
+			this.vaultDirty = info.dirty;
+			this.saveState = "saved";
+		} catch {
+			if (session === this.session) this.banner = "saveFailed";
+			return;
+		}
+		this.closeEditor();
 		this.clearSelection();
-		await this.refresh(this.session);
+		await this.refresh(session);
 	}
 
+	/** "Keep mine": write over what the other app saved. */
 	async keepMine() {
 		this.banner = null;
-		await this.persist();
+		await this.persist(true);
+	}
+
+	/** Shows the banner if another app changed the file (window focus). */
+	async checkExternal() {
+		if (this.screen !== "vault" || this.banner) return;
+		const session = this.session;
+		const unchanged = await this.api.vault.checkFile().catch(() => true);
+		if (!unchanged && session === this.session && !this.banner) {
+			this.banner = "externalChange";
+		}
+	}
+
+	/**
+	 * Runs `action` once nothing would be lost: a modified editor is saved or
+	 * discarded, a save in flight finishes, and changes the last save could
+	 * not write are retried or discarded. Lock does not come through here.
+	 */
+	requestLeaveVault(action: () => void | Promise<void>) {
+		const session = this.session;
+		return this.requestLeave(async () => {
+			// Changes still in flight finish first, then the backend has the
+			// last word on whether anything is unsaved.
+			while (this.pending.size || this.saving) {
+				await Promise.allSettled([...this.pending, this.saving]);
+				if (session !== this.session) return;
+			}
+			if (this.screen === "vault") {
+				const info = await this.api.vault.databaseInfo().catch(() => null);
+				// Lock (or another database) meanwhile: this exit is stale.
+				if (session !== this.session) return;
+				if (info) this.vaultDirty = info.dirty;
+			}
+			if (this.screen === "vault" && this.vaultDirty) {
+				this.confirm = { kind: "unsaved", action };
+				return;
+			}
+			await action();
+		});
+	}
+
+	async resolveUnsaved(choice: "retry" | "discard" | "cancel") {
+		const pending = this.confirm;
+		if (pending?.kind !== "unsaved") return;
+		this.confirm = null;
+		if (choice === "cancel") return;
+		const session = this.session;
+		if (choice === "retry" && !(await this.persist())) return;
+		if (session !== this.session) return;
+		await pending.action();
 	}
 
 	// ---------------------------------------------------------------- database settings
 
-	async updateDatabase(patch: Partial<Omit<DatabaseInfo, "path">>) {
+	async updateDatabase(patch: DatabasePatch) {
 		if (!this.db) return;
+		await this.change(async (session) => {
+			const info = await this.api.vault.updateDatabase(patch);
+			if (session === this.session) this.db = info;
+		});
+	}
+
+	/**
+	 * New master password. The outcome says what the file now uses:
+	 * - "changed": saved with the new password;
+	 * - "notDurable": written with the new password, not confirmed on disk;
+	 * - "pending": not saved; the new password applies at the next successful
+	 *   save, unless the change is discarded (Reload);
+	 * - "rejected": nothing changed, the old password stays.
+	 */
+	async changeMasterPassword(
+		password: string,
+	): Promise<"changed" | "notDurable" | "pending" | "rejected"> {
+		if (!this.db || !password) return "rejected";
 		const session = this.session;
-		const info = await this.api.vault.updateDatabase(patch);
-		if (session !== this.session) return;
-		this.db = info;
-		if (patch.name !== undefined) await this.refresh(session);
-		await this.persist();
+		let accepted = false;
+		const saved = await this.change(async () => {
+			await this.api.vault.changeMasterPassword(password);
+			accepted = true;
+		});
+		if (!accepted || session !== this.session) return "rejected";
+		if (saved) return "changed";
+		return this.lastSaveError === "notDurable" ? "notDurable" : "pending";
+	}
+
+	/** Drops the unsaved changes, a pending new master password included. */
+	async discardUnsaved() {
+		await this.reloadExternal();
+	}
+
+	async openUrl(url: string) {
+		await this.api.vault.openUrl(url).catch(() => {});
 	}
 
 	async benchmark(memoryMib: number, parallelism: number): Promise<number | null> {
@@ -769,21 +976,21 @@ export class AppState {
 		switch (id) {
 			case "new_database":
 				return inVault
-					? this.requestLeave(() => this.leaveVault("create"))
+					? this.requestLeaveVault(() => this.leaveVault("create"))
 					: this.startCreate();
 			case "open_database":
 				return inVault
-					? this.requestLeave(() => this.leaveVault("open"))
+					? this.requestLeaveVault(() => this.leaveVault("open"))
 					: this.openOtherFile();
 			case "close_database":
-				return inVault && this.requestLeave(() => this.lock());
+				return inVault && this.requestLeaveVault(() => this.lock());
 			case "save":
 				if (this.editor) return this.saveEditor();
 				return inVault && this.persist();
 			case "lock":
 				return inVault && this.lock();
 			case "quit":
-				return this.requestLeave(() => this.api.app.exit());
+				return this.requestLeaveVault(() => this.api.app.exit());
 			case "find":
 				if (!inVault) return;
 				this.overlay = null;
@@ -825,7 +1032,10 @@ export class AppState {
 			case "about":
 				return this.openSettings("about");
 			case "demo_external_change":
-				if (this.isDemo && inVault) this.banner = "externalChange";
+				if (this.isDemo && inVault && "externalChange" in this.api.vault) {
+					(this.api.vault as { externalChange: boolean }).externalChange = true;
+					await this.checkExternal();
+				}
 				return;
 			case "demo_save_failure":
 				if (this.isDemo && "failNextSave" in this.api.vault) {

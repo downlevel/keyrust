@@ -58,7 +58,9 @@ These are design goals; most of them are implemented in Milestone 3 (see [docs/T
 - **Memory forensics after the fact**: wiping is best effort. The operating system may swap memory to
   disk or produce crash dumps, and the webview's JavaScript engine does not guarantee that strings are
   erased.
-- **Clipboard managers and history**: Keyrust asks the platform to exclude copied secrets from clipboard
+- **Clipboard managers and history**: copying happens in Rust (the password never passes through the
+  webview); Keyrust keeps only a hash of what it copied and clears the clipboard after the configured
+  time, on lock and on exit, only if it still holds that value. It asks the platform to exclude copied secrets from clipboard
   history where supported, but cannot control third-party clipboard tools.
 - **Sync conflicts and malicious sync providers**: a provider cannot read the file, but it can delete it
   or roll it back to an older version. Keep backups. A program that does not use Keyrust's lock

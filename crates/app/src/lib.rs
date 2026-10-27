@@ -1,31 +1,68 @@
 //! Tauri shell of Keyrust.
 //!
-//! Commands exposed to the webview live here. Secrets must never cross the IPC
-//! boundary unless the user explicitly asks to reveal them (see
+//! Commands exposed to the webview live in `commands`. Secrets must never
+//! cross the IPC boundary unless the user explicitly asks to reveal them (see
 //! docs/ARCHITECTURE.md, "Principi di confine").
+//!
+//! The dialog and opener plugins are called from Rust only: no capability
+//! grants the webview any of their permissions.
 
+mod clipboard;
+mod commands;
+mod error;
 mod menu;
 
-use std::path::PathBuf;
 use std::sync::Mutex;
 
-use keyrust_core::settings::{self, Settings};
+use keyrust_core::settings;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+
+use clipboard::{Board, Clipboard, SystemBoard};
+#[allow(clippy::wildcard_imports)] // generate_handler! below lists bare names
+use commands::*;
 
 /// Names of the IPC commands, kept in sync with `generate_handler!` below and
 /// checked by `tests/security_config.rs`.
-pub const COMMANDS: &[&str] = &["app_info", "get_settings", "update_settings", "exit_app"];
+pub const COMMANDS: &[&str] = &[
+    "app_info",
+    "get_settings",
+    "update_settings",
+    "exit_app",
+    "recent_files",
+    "choose_database_file",
+    "choose_new_database_path",
+    "unlock",
+    "create",
+    "lock_vault",
+    "database_info",
+    "tree",
+    "list_entries",
+    "get_entry",
+    "get_entry_for_edit",
+    "reveal_field",
+    "copy_field",
+    "save_entry",
+    "delete_entry",
+    "restore_entry",
+    "create_group",
+    "rename_group",
+    "delete_group",
+    "update_database",
+    "change_master_password",
+    "save",
+    "save_overwrite",
+    "reload",
+    "check_file",
+    "generate_password",
+    "estimate_strength",
+    "benchmark_kdf",
+    "open_url",
+];
 
 #[derive(Serialize)]
 struct AppInfo {
     version: &'static str,
-}
-
-/// Settings held in memory and the file they persist to.
-struct SettingsState {
-    path: PathBuf,
-    current: Mutex<Settings>,
 }
 
 /// Returns non-sensitive build information for the UI.
@@ -36,40 +73,12 @@ fn app_info() -> AppInfo {
     }
 }
 
-#[tauri::command]
-fn get_settings(state: State<'_, SettingsState>) -> Result<Settings, String> {
-    state
-        .current
-        .lock()
-        .map(|s| s.clone())
-        .map_err(|_| "settings unavailable".to_string())
-}
-
-/// Validates, persists and returns the effective settings. Errors never
-/// include file paths.
-#[tauri::command]
-fn update_settings(
-    state: State<'_, SettingsState>,
-    settings: Settings,
-) -> Result<Settings, String> {
-    let settings = settings.normalized();
-    // Hold the lock while saving so concurrent updates cannot leave the file
-    // and the in-memory copy disagreeing.
-    let mut current = state
-        .current
-        .lock()
-        .map_err(|_| "settings unavailable".to_string())?;
-    settings::save(&state.path, &settings)
-        .map_err(|e| format!("could not save settings ({:?})", e.kind()))?;
-    *current = settings.clone();
-    Ok(settings)
-}
-
-/// Quits the application. The UI calls it from the Quit command once unsaved
-/// changes have been handled.
+/// Quits the application. The UI calls it once unsaved changes have been
+/// handled; the clipboard is cleared if it still holds a copied value.
 #[tauri::command]
 fn exit_app(app: AppHandle) {
     tracing::info!("quit requested");
+    app.state::<Clipboard>().clear_if_unchanged(None);
     app.exit(0);
 }
 
@@ -91,10 +100,25 @@ pub fn run() {
 
     #[allow(clippy::expect_used)] // Nothing to recover: the app cannot start.
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        // No script that routes webview links through the plugin: links are
+        // opened by the `open_url` command after validation.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .setup(|app| {
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let current = Mutex::new(settings::load(&path));
             app.manage(SettingsState { path, current });
+            app.manage(VaultState::default());
+            app.manage(AllowedPaths::default());
+            let board = SystemBoard::new().map(|b| Box::new(b) as Box<dyn Board>);
+            if board.is_none() {
+                tracing::warn!("no system clipboard available");
+            }
+            app.manage(Clipboard::new(board));
             app.set_menu(menu::build(app.handle())?)?;
             Ok(())
         })
@@ -106,11 +130,57 @@ pub fn run() {
                 menu::forward(app, event.id().as_ref(), &known);
             }
         })
+        .on_window_event(|window, event| {
+            // With a database open, closing the window goes through the UI's
+            // Quit command, which handles unsaved changes first.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let open = window
+                    .state::<VaultState>()
+                    .0
+                    .lock()
+                    .map(|v| v.is_some())
+                    .unwrap_or(false);
+                if open && window.emit(menu::MENU_EVENT, "quit").is_ok() {
+                    api.prevent_close();
+                } else {
+                    window.state::<Clipboard>().clear_if_unchanged(None);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             app_info,
             get_settings,
             update_settings,
-            exit_app
+            exit_app,
+            recent_files,
+            choose_database_file,
+            choose_new_database_path,
+            unlock,
+            create,
+            lock_vault,
+            database_info,
+            tree,
+            list_entries,
+            get_entry,
+            get_entry_for_edit,
+            reveal_field,
+            copy_field,
+            save_entry,
+            delete_entry,
+            restore_entry,
+            create_group,
+            rename_group,
+            delete_group,
+            update_database,
+            change_master_password,
+            save,
+            save_overwrite,
+            reload,
+            check_file,
+            generate_password,
+            estimate_strength,
+            benchmark_kdf,
+            open_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Keyrust application");

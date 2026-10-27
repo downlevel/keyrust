@@ -22,7 +22,9 @@
 
 	const rows: Row[] = $derived([
 		{ id: ALL, name: m.all_entries(), depth: 0, count: app.liveCount, kind: "all" as const },
-		...app.groups.filter((g) => !g.isRecycleBin).map((g) => ({ ...g, kind: "group" as const })),
+		...app.groups
+			.filter((g) => !g.isRecycleBin && !g.inRecycleBin)
+			.map((g) => ({ ...g, kind: "group" as const })),
 	]);
 	const bin: Row | null = $derived.by(() => {
 		const g = app.groups.find((x) => x.isRecycleBin);

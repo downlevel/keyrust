@@ -12,6 +12,12 @@ ignore = [
     # through the gtk-rs 0.18 bindings Tauri uses on Linux; no maintained
     # replacement exists downstream. Revisit when Tauri moves off GTK3.
     { id = "RUSTSEC-2024-0370", reason = "transitive via Tauri's Linux GTK3 backend, no fix available" },
+    # zbus_names / zvariant / zvariant_derive are "unmaintained as standalone
+    # crates" (merged back into zbus): no vulnerability. They reach us through
+    # zbus, used by the dialog plugin's XDG portal backend on Linux.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus; informational, via tauri-plugin-dialog (rfd/ashpd)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus; informational, via tauri-plugin-dialog (rfd/ashpd)" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus; informational, via tauri-plugin-dialog (rfd/ashpd)" },
 ]
 
 [licenses]
@@ -29,6 +35,8 @@ allow = [
     "CC0-1.0",
     "Unicode-3.0",
     "MPL-2.0",
+    # Boost: permissive, OSI and FSF approved, GPL-compatible (clipboard-win via arboard).
+    "BSL-1.0",
 ]
 
 [bans]

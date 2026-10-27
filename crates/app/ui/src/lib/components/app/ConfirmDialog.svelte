@@ -29,11 +29,15 @@
 				action: m.confirm_delete_group_action(),
 			};
 		}
+		if (c.kind === "unsaved") {
+			return { title: m.unsaved_title(), body: m.unsaved_body(), action: m.unsaved_retry() };
+		}
 		return { title: m.leave_title(), body: m.leave_body(), action: m.leave_save() };
 	});
 
 	function dismiss() {
 		if (c?.kind === "leave") void app.resolveLeave("keep");
+		else if (c?.kind === "unsaved") void app.resolveUnsaved("cancel");
 		else app.confirm = null;
 	}
 </script>
@@ -54,6 +58,16 @@
 						>{m.leave_discard()}</Button
 					>
 					<Button onclick={() => void app.resolveLeave("save")}>{m.leave_save()}</Button>
+				{:else if c.kind === "unsaved"}
+					<Button variant="outline" onclick={() => void app.resolveUnsaved("cancel")}
+						>{m.confirm_cancel()}</Button
+					>
+					<Button variant="outline" onclick={() => void app.resolveUnsaved("discard")}
+						>{m.unsaved_discard()}</Button
+					>
+					<Button onclick={() => void app.resolveUnsaved("retry")}
+						>{m.unsaved_retry()}</Button
+					>
 				{:else}
 					<Button variant="outline" onclick={dismiss}>{m.confirm_cancel()}</Button>
 					<Button

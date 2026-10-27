@@ -38,7 +38,7 @@
 	const entries = $derived(
 		app.screen === "vault"
 			? app.entries
-					.filter((e) => e.groupId !== app.recycleBinId)
+					.filter((e) => !app.isRecycled(e.groupId))
 					.sort((a, b) => a.title.localeCompare(b.title))
 			: [],
 	);

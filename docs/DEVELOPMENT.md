@@ -127,14 +127,25 @@ The development machine has no Tauri system libraries, so the app is compiled on
 on pull requests, pushes to `main` and manual runs). With an installer from a green run
 (Windows SmartScreen: *More info* → *Run anyway*; macOS: right click → *Open*):
 
-- [ ] The "Keyrust" window opens on the Unlock screen with the **Demo data** notice; any password
-      except `wrong` unlocks the sample database
+- [ ] First run shows the Welcome screen (no demo notice). *Create new database* → *Choose…* opens the
+      native save dialog; the database is created and opens empty
+- [ ] Add a few entries and a group, lock (Ctrl+L), unlock again: everything is there; the file shows up
+      under *Recent*
+- [ ] The same file opens in KeePassXC with the same entries; an entry edited in KeePassXC while
+      Keyrust is open brings up the "changed by another app" banner when you switch back to Keyrust
+      (Reload shows KeePassXC's change, Keep mine keeps yours)
+- [ ] *Copy password* puts the password in the clipboard, and it is gone after the configured seconds
+      (unless you copied something else meanwhile); locking clears it too
+- [ ] Closing the window with the editor open, or after a failed save, asks before quitting
+- [ ] An entry URL opens in the system browser
 - [ ] DevTools (right click → Inspect, or Ctrl+Shift+I): the console shows **no Content Security
       Policy violations**
 - [ ] The native menu has File / Edit / Entry / Group / Tools / Help (on macOS also the Keyrust menu);
       *Entry → New Entry* and *Help → Keyboard Shortcuts* act like Ctrl+N and Ctrl+/
 - [ ] Copy and paste work inside text fields (Ctrl+C / Ctrl+V, or ⌘C / ⌘V on macOS), and Ctrl+C (⌘C)
-      with an entry selected in the list shows "Password copied · clears in 20s"
+      with an entry selected in the list copies its password
+- [ ] In DevTools, `window.__TAURI_INTERNALS__.invoke("plugin:dialog|open")` is **rejected** (the webview
+      has no plugin permission)
 - [ ] Settings → General values survive a restart (they are the real `settings.json`)
 - [ ] Optional, from source: `cargo test -p keyrust-core` (with KeePassXC installed) and
       `cd crates/app/ui; pnpm install; pnpm tauri dev`

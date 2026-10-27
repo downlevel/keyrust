@@ -1,7 +1,9 @@
 import { estimateStrength } from "./strength";
 import type {
+	Argon2idParams,
 	CreateOptions,
 	DatabaseInfo,
+	DatabasePatch,
 	EntryDetail,
 	EntryDraft,
 	EntryId,
@@ -199,6 +201,7 @@ export class DemoVault implements VaultApi {
 	/** Demo switches, driven by the "Demo: …" palette commands. */
 	firstRun = false;
 	failNextSave = false;
+	externalChange = false;
 
 	private delayMs: number;
 	private callDelayMs: number;
@@ -217,18 +220,24 @@ export class DemoVault implements VaultApi {
 		return this.firstRun ? [] : RECENTS.map((r) => ({ ...r }));
 	}
 
-	async chooseFile(): Promise<RecentFile | null> {
+	async chooseFile(): Promise<RecentFile> {
 		await this.pause();
 		return { ...RECENTS[0] };
+	}
+
+	async chooseNewPath(name: string): Promise<RecentFile> {
+		await this.pause();
+		const clean = name.trim() || "Passwords";
+		return { name: clean, path: `~/Documents/${clean}.kdbx`, missing: true };
 	}
 
 	async unlock(path: string, password: string): Promise<DatabaseInfo> {
 		await this.pause(this.delayMs);
 		const recent = RECENTS.find((r) => r.path === path);
 		if (!recent || recent.missing) throw new VaultError("notFound");
-		if (!password || password.toLowerCase() === "wrong") throw new VaultError("wrongPassword");
-		this.load(recent.name, recent.path);
-		return { ...(this.info as DatabaseInfo) };
+		if (!password || password.toLowerCase() === "wrong") throw new VaultError("wrongKey");
+		this.load(recent.name);
+		return this.view();
 	}
 
 	async create(options: CreateOptions): Promise<DatabaseInfo> {
@@ -236,14 +245,21 @@ export class DemoVault implements VaultApi {
 		if (!options.password || !options.name.trim()) throw new VaultError("invalid");
 		this.info = {
 			name: options.name.trim(),
-			path: options.path,
 			cipher: options.cipher,
-			kdf: { ...options.kdf },
+			kdf: argon2id(options.kdf),
 			recycleBin: true,
+			version: [4, 1],
+			dirty: false,
 		};
 		this.groups = [{ id: RECYCLE_BIN, parent: ROOT, name: "Recycle Bin", isRecycleBin: true }];
 		this.entries = [];
-		return { ...this.info };
+		return this.view();
+	}
+
+	async databaseInfo(): Promise<DatabaseInfo> {
+		await this.pause();
+		this.open();
+		return this.view();
 	}
 
 	async lock(): Promise<void> {
@@ -286,6 +302,7 @@ export class DemoVault implements VaultApi {
 			hasPassword: e.password.length > 0,
 			created: e.created,
 			modified: e.modified,
+			historyLen: 0,
 		};
 	}
 
@@ -308,15 +325,18 @@ export class DemoVault implements VaultApi {
 		return this.find(id)[field];
 	}
 
-	async copyField(id: EntryId): Promise<void> {
-		// Simulated: the demo never writes to the system clipboard.
+	async copyField(id: EntryId): Promise<number | null> {
+		// Simulated: the demo never writes to the system clipboard. The UI
+		// uses its own clipboard setting for the countdown.
 		await this.pause();
 		this.find(id);
+		return null;
 	}
 
 	async saveEntry(draft: EntryDraft): Promise<EntryId> {
 		await this.pause();
 		this.open();
+		if (this.info) this.info.dirty = true;
 		if (!draft.title.trim()) throw new VaultError("invalid");
 		const today = new Date().toISOString().slice(0, 10);
 		if (draft.id) {
@@ -331,8 +351,9 @@ export class DemoVault implements VaultApi {
 
 	async deleteEntry(id: EntryId): Promise<void> {
 		await this.pause();
+		if (this.info) this.info.dirty = true;
 		const e = this.find(id);
-		if (e.groupId === RECYCLE_BIN || !this.open().recycleBin) {
+		if (this.inBin(e.groupId) || !this.open().recycleBin) {
 			this.entries = this.entries.filter((x) => x.id !== id);
 		} else {
 			e.previousGroupId = e.groupId;
@@ -342,6 +363,7 @@ export class DemoVault implements VaultApi {
 
 	async restoreEntry(id: EntryId): Promise<void> {
 		await this.pause();
+		if (this.info) this.info.dirty = true;
 		const e = this.find(id);
 		const target = this.groups.find((g) => g.id === e.previousGroupId && !g.isRecycleBin);
 		e.groupId = target ? target.id : ROOT;
@@ -351,6 +373,7 @@ export class DemoVault implements VaultApi {
 	async createGroup(parent: GroupId, name: string): Promise<GroupId> {
 		await this.pause();
 		this.open();
+		if (this.info) this.info.dirty = true;
 		if (!name.trim()) throw new VaultError("invalid");
 		const id = `group-${this.nextId++}`;
 		this.groups.push({ id, parent: parent === RECYCLE_BIN ? ROOT : parent, name: name.trim() });
@@ -359,44 +382,93 @@ export class DemoVault implements VaultApi {
 
 	async renameGroup(id: GroupId, name: string): Promise<void> {
 		await this.pause();
+		if (this.info) this.info.dirty = true;
 		const g = this.groups.find((x) => x.id === id && !x.isRecycleBin);
 		if (!g || !name.trim()) throw new VaultError("invalid");
 		g.name = name.trim();
 	}
 
+	/** Like the core: into the recycle bin whole, or permanently from there. */
 	async deleteGroup(id: GroupId): Promise<void> {
 		await this.pause();
+		if (this.info) this.info.dirty = true;
+		const g = this.groups.find((x) => x.id === id && !x.isRecycleBin);
+		if (!g) throw new VaultError("invalid");
+		if (this.open().recycleBin && !this.inBin(g.id)) {
+			g.parent = RECYCLE_BIN;
+			return;
+		}
 		const doomed = new Set<GroupId>();
 		const collect = (gid: GroupId) => {
 			doomed.add(gid);
-			this.groups.filter((g) => g.parent === gid).forEach((g) => collect(g.id));
+			this.groups.filter((x) => x.parent === gid).forEach((x) => collect(x.id));
 		};
-		const g = this.groups.find((x) => x.id === id && !x.isRecycleBin);
-		if (!g) throw new VaultError("invalid");
 		collect(id);
-		for (const e of this.entries) {
-			if (doomed.has(e.groupId)) {
-				e.previousGroupId = undefined;
-				e.groupId = RECYCLE_BIN;
-			}
-		}
+		this.entries = this.entries.filter((e) => !doomed.has(e.groupId));
 		this.groups = this.groups.filter((x) => !doomed.has(x.id));
 	}
 
-	async updateDatabase(patch: Partial<Omit<DatabaseInfo, "path">>): Promise<DatabaseInfo> {
-		await this.pause();
-		const info = this.open();
-		Object.assign(info, patch);
-		return { ...info, kdf: { ...info.kdf } };
+	/** The recycle bin or a group inside it. */
+	private inBin(groupId: GroupId): boolean {
+		let current: GroupId | null = groupId;
+		while (current) {
+			if (current === RECYCLE_BIN) return true;
+			current = this.groups.find((g) => g.id === current)?.parent ?? null;
+		}
+		return false;
 	}
 
-	async save(): Promise<void> {
+	async updateDatabase(patch: DatabasePatch): Promise<DatabaseInfo> {
 		await this.pause();
-		this.open();
+		const info = this.open();
+		if (patch.name !== undefined) info.name = patch.name;
+		if (patch.cipher !== undefined) info.cipher = patch.cipher;
+		if (patch.recycleBin !== undefined) info.recycleBin = patch.recycleBin;
+		if (patch.kdf !== undefined) info.kdf = argon2id(patch.kdf);
+		info.dirty = true;
+		return this.view();
+	}
+
+	async changeMasterPassword(password: string): Promise<void> {
+		await this.pause();
+		if (!password) throw new VaultError("invalid");
+		this.open().dirty = true;
+	}
+
+	async save(): Promise<DatabaseInfo> {
+		await this.pause();
+		const info = this.open();
+		if (this.externalChange) throw new VaultError("externalChange");
 		if (this.failNextSave) {
 			this.failNextSave = false;
-			throw new VaultError("saveFailed");
+			throw new VaultError("io");
 		}
+		info.dirty = false;
+		return this.view();
+	}
+
+	async saveOverwrite(): Promise<DatabaseInfo> {
+		await this.pause();
+		this.externalChange = false;
+		this.open().dirty = false;
+		return this.view();
+	}
+
+	async reload(): Promise<DatabaseInfo> {
+		await this.pause();
+		const info = this.open();
+		this.externalChange = false;
+		this.load(info.name);
+		return this.view();
+	}
+
+	async checkFile(): Promise<boolean> {
+		await this.pause();
+		return !this.externalChange;
+	}
+
+	async openUrl(): Promise<void> {
+		// The demo never leaves the page.
 	}
 
 	async generatePassword(options: GeneratorOptions): Promise<string> {
@@ -425,16 +497,22 @@ export class DemoVault implements VaultApi {
 		return Math.max(2, Math.round((448 / Math.max(8, memoryMib)) * Math.min(parallelism, 4)));
 	}
 
-	private load(name: string, path: string) {
+	private load(name: string) {
 		this.info = {
 			name,
-			path,
 			cipher: "aes256",
-			kdf: { memoryMib: 64, iterations: 7, parallelism: 2 },
+			kdf: argon2id({ memoryMib: 64, iterations: 7, parallelism: 2 }),
 			recycleBin: true,
+			version: [4, 1],
+			dirty: false,
 		};
 		this.groups = GROUPS.map((g) => ({ ...g }));
 		this.entries = ENTRIES.map((e) => ({ ...e }));
+	}
+
+	private view(): DatabaseInfo {
+		const info = this.open();
+		return { ...info, kdf: { ...info.kdf }, version: [...info.version] };
 	}
 
 	private open(): DatabaseInfo {
@@ -452,6 +530,16 @@ export class DemoVault implements VaultApi {
 	private pause(ms = this.callDelayMs): Promise<void> {
 		return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 	}
+}
+
+function argon2id(p: Argon2idParams): DatabaseInfo["kdf"] {
+	return {
+		kind: "argon2",
+		variant: "argon2id",
+		memoryBytes: p.memoryMib * 1024 * 1024,
+		iterations: p.iterations,
+		parallelism: p.parallelism,
+	};
 }
 
 function summary(e: DemoEntry): EntrySummary {
