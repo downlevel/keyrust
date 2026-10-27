@@ -35,3 +35,17 @@
  ]
 }
 ```
+
+## Build (host Claude) — note di implementazione e CI
+- Implementazione su branch `milestone-1`: a145152 (infrastruttura), 3892e18 (fix CI), 0ad2c3b (fix compatibilità allegati).
+- CI run 40526834534: Vitest su Windows falliva per `D:\D:\…` (URL → path) → `fileURLToPath`; i job core Windows/macOS
+  fallivano senza log leggibili (API log 403 senza credenziali) → script `.github/scripts/annotate_test_failures.py`
+  che espone i test falliti come annotazioni, e ricerca di KeePassXC nei percorsi standard.
+- CI run 40529323891 e PC Windows dell'utente: T2 falliva con KeePassXC recente, che esporta `Ref="0"` per ogni
+  allegato (verificato dall'utente con l'export della fixture). Il confronto ora identifica gli allegati per
+  (UUID voce, versione in cronologia, nome): voci correnti lette con `keepassxc-cli attachment-export`, versioni in
+  cronologia con keepass-rs; dove i `Ref` sono indici di pool (KeePassXC 2.7.x) restano un controllo incrociato.
+  Mutation check in entrambe le modalità (export reale e `Ref` forzati a 0): alterare `blob.bin` o `readme.txt`
+  nel file risalvato fa fallire il diff canonico, anche con il controllo delle capacità disabilitato.
+- Deviazione dal piano: per le versioni in cronologia, con KeePassXC recente, il contenuto degli allegati non è più
+  verificato da KeePassXC ma da keepass-rs (la CLI non li esporta). Su Linux (2.7.6) la verifica indipendente resta.
