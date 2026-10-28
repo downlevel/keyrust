@@ -15,12 +15,6 @@
 	const editor = $derived(app.editor);
 
 	let attempted = $state(false);
-	let password = $state(app.editor?.draft.password ?? "");
-	// Keep the local field in step when the generator fills it in.
-	$effect(() => {
-		const value = app.editor?.draft.password ?? "";
-		if (value !== password) password = value;
-	});
 
 	let strength = $state<StrengthEstimate>(estimateStrength(""));
 	let sequence = 0;
@@ -102,7 +96,7 @@
 					<div class="flex-1">
 						<SecretInput
 							id="editor-password"
-							bind:value={password}
+							value={editor?.draft.password ?? ""}
 							showCapsWarning={false}
 							oninput={(value) => app.updateDraft({ password: value })}
 						/>

@@ -66,7 +66,7 @@
 			aria-describedby={describedby}
 			onkeydown={updateCaps}
 			onkeyup={updateCaps}
-			oninput={() => oninput?.(value)}
+			oninput={(e) => oninput?.(e.currentTarget.value)}
 		/>
 		<button
 			type="button"
