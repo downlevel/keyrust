@@ -47,8 +47,8 @@
 				);
 				// The backend locked the vault (idle, screen lock, sleep, minimize).
 				unlisten.push(
-					await listen<{ reason: LockReason }>("locked", (event) =>
-						app.autoLocked(event.payload.reason),
+					await listen<{ reason: LockReason; session: number }>("locked", (event) =>
+						app.autoLocked(event.payload.reason, event.payload.session),
 					),
 				);
 			});

@@ -82,12 +82,18 @@ pub struct DatabaseView {
     #[serde(flatten)]
     pub info: DatabaseInfo,
     pub dirty: bool,
+    /// Only in the answer of `unlock` / `create`: the generation of the
+    /// session just installed, so the UI can tell a `locked` event about an
+    /// older session from one about this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<u64>,
 }
 
 fn view(vault: &Vault) -> DatabaseView {
     DatabaseView {
         info: vault.info(),
         dirty: vault.is_dirty(),
+        session: None,
     }
 }
 
@@ -300,7 +306,10 @@ pub async fn create(app: AppHandle, request: CreateRequest) -> IpcResult<Databas
 /// Makes `vault` the open database unless a lock happened since `generation`
 /// was read: then it is dropped (zeroized) and the answer is `locked`.
 fn install(app: &AppHandle, vault: Vault, generation: u64) -> IpcResult<DatabaseView> {
-    let result = view(&vault);
+    let result = DatabaseView {
+        session: Some(generation),
+        ..view(&vault)
+    };
     let state = app.state::<VaultState>();
     let mut session = lock(&state.0)?;
     if let Err(refused) = session.install(vault, generation) {
@@ -318,27 +327,30 @@ fn install(app: &AppHandle, vault: Vault, generation: u64) -> IpcResult<Database
 /// progress and clears the clipboard if it still holds a copied value.
 /// Returns whether a vault was open. A poisoned mutex does not stop a lock.
 pub fn lock_session(state: &VaultState, clipboard: &Clipboard) -> bool {
-    lock_session_if(state, clipboard, || true)
+    lock_session_if(state, clipboard, || true).is_some()
 }
 
 /// Like [`lock_session`], if `still_wanted` holds once the session mutex is
 /// taken (an idle lock re-checks the activity there: a save may have held the
-/// mutex while the user went on working).
+/// mutex while the user went on working). If a vault was open, returns the
+/// generation that the lock started: every session installed afterwards has
+/// at least this generation.
 pub fn lock_session_if(
     state: &VaultState,
     clipboard: &Clipboard,
     still_wanted: impl FnOnce() -> bool,
-) -> bool {
+) -> Option<u64> {
     let mut session = state.0.lock().unwrap_or_else(PoisonError::into_inner);
     if !still_wanted() {
-        return false;
+        return None;
     }
     let vault = session.lock();
+    let generation = session.generation();
     drop(session);
     let was_open = vault.is_some();
     drop(vault);
     clipboard.clear_if_unchanged(None);
-    was_open
+    was_open.then_some(generation)
 }
 
 #[tauri::command]

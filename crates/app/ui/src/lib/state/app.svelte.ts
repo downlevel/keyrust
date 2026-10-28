@@ -168,6 +168,8 @@ export class AppState {
 	private settingsQueue: Promise<void> = Promise.resolve();
 	private settingsWrite = 0;
 	private toastTimer: ReturnType<typeof setInterval> | null = null;
+	/** Backend generation of the open session (from unlock / create). */
+	private backendSession: number | null = null;
 	/** When activity was last sent to the backend (ms, `Date.now()`). */
 	private activitySent = -Infinity;
 
@@ -384,6 +386,7 @@ export class AppState {
 		]);
 		if (session !== this.session) return;
 		this.db = info;
+		this.backendSession = info.session ?? null;
 		this.vaultDirty = info.dirty;
 		this.tree = tree;
 		this.entries = entries;
@@ -410,7 +413,10 @@ export class AppState {
 	 * as `lock()`, without calling the backend, and nothing is asked even with
 	 * unsaved changes. A database still being opened is abandoned too.
 	 */
-	autoLocked(reason: LockReason) {
+	autoLocked(reason: LockReason, session?: number) {
+		// A late event about an older backend session: the open one is newer.
+		if (session !== undefined && this.backendSession !== null && session <= this.backendSession)
+			return;
 		const opening = this.busy === "unlock" || this.busy === "create";
 		if (!this.db && !opening) return;
 		const notice: LockNotice = {
@@ -472,6 +478,7 @@ export class AppState {
 		this.saveState = "saved";
 		this.lockNotice = null;
 		this.activitySent = -Infinity;
+		this.backendSession = null;
 	}
 
 	// ---------------------------------------------------------------- leaving the editor

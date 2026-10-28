@@ -34,6 +34,9 @@ const SUSPEND_GAP: Duration = Duration::from_secs(4);
 #[derive(Clone, Serialize)]
 struct Locked {
     reason: Reason,
+    /// The generation the lock started. The event can reach the UI after a
+    /// newer unlock (whose `session` is at least this): the UI ignores it then.
+    session: u64,
 }
 
 /// Last user activity and the way to the locker thread.
@@ -140,14 +143,14 @@ fn locker(app: &AppHandle, reason: Reason) {
         reason != Reason::Idle
             || policy::idle_expired(autolock.last_activity(), Instant::now(), minutes)
     };
-    let was_open = lock_session_if(
+    let locked = lock_session_if(
         &app.state::<VaultState>(),
         &app.state::<Clipboard>(),
         still_wanted,
     );
-    if was_open {
+    if let Some(session) = locked {
         tracing::info!(?reason, "vault locked automatically");
-        let _ = app.emit(LOCKED_EVENT, Locked { reason });
+        let _ = app.emit(LOCKED_EVENT, Locked { reason, session });
     }
 }
 

@@ -178,6 +178,12 @@ fn move_untracked(
 }
 
 impl Vault {
+    /// The keepass-rs model, for the round-trip oracle of the fuzz harness.
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn database(&self) -> &Database {
+        &self.db
+    }
+
     // ------------------------------------------------------------ open / create
 
     /// Opens a database file. The file is read once; the model and the stamp

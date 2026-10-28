@@ -3,10 +3,16 @@
 //! saves it with keepass-rs and reopens it through `Vault`: random mutations of
 //! an encrypted file stop at the HMAC check, this reaches the XML writer and
 //! parser and the decompression with extreme content.
+//!
+//! The oracle compares everything the harness generates: the group tree,
+//! every field with its protection flag, attachments and history, both through
+//! `Vault`'s views and on the reopened keepass-rs model.
+
+use std::collections::BTreeMap;
 
 use arbitrary::Arbitrary;
 use keepass::config::{DatabaseConfig, KdfConfig};
-use keepass::db::{History, Value, fields};
+use keepass::db::{GroupRef, History, Value, fields};
 use keepass::{Database, DatabaseKey};
 use secrecy::{ExposeSecret, SecretString};
 
@@ -75,6 +81,74 @@ struct Expected {
     password: String,
     url: String,
     notes: String,
+}
+
+/// Field name → (value, protected). Empty values are left out: KDBX writers
+/// do not distinguish an empty field from an absent one.
+type Fields = BTreeMap<String, (String, bool)>;
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct EntrySnapshot {
+    /// Names of the groups from the root (excluded) down to the entry.
+    path: Vec<String>,
+    fields: Fields,
+    attachments: BTreeMap<String, Vec<u8>>,
+    history: Vec<Fields>,
+}
+
+/// The parts of a database the harness generates, in a comparable form:
+/// every group path, and every entry with its place in the tree.
+#[derive(Debug, PartialEq, Eq)]
+struct Snapshot {
+    groups: Vec<Vec<String>>,
+    entries: Vec<EntrySnapshot>,
+}
+
+fn fields_of(fields: &std::collections::HashMap<String, Value<String>>) -> Fields {
+    fields
+        .iter()
+        .filter(|(_, v)| !v.get().is_empty())
+        .map(|(k, v)| (k.clone(), (v.get().clone(), v.is_protected())))
+        .collect()
+}
+
+fn snapshot(db: &Database) -> Snapshot {
+    fn walk(group: GroupRef<'_>, path: &[String], out: &mut Snapshot) {
+        for entry in group.entries() {
+            out.entries.push(EntrySnapshot {
+                path: path.to_vec(),
+                fields: fields_of(&entry.fields),
+                attachments: entry
+                    .attachments_named()
+                    .map(|(name, a)| (name.to_owned(), a.data.get().clone()))
+                    .collect(),
+                history: entry
+                    .history
+                    .as_ref()
+                    .map(|h| {
+                        h.get_entries()
+                            .iter()
+                            .map(|e| fields_of(&e.fields))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
+        }
+        for child in group.groups() {
+            let mut child_path = path.to_vec();
+            child_path.push(child.name.clone());
+            out.groups.push(child_path.clone());
+            walk(child, &child_path, out);
+        }
+    }
+    let mut out = Snapshot {
+        groups: Vec::new(),
+        entries: Vec::new(),
+    };
+    walk(db.root(), &[], &mut out);
+    out.groups.sort();
+    out.entries.sort();
+    out
 }
 
 /// Saves `model` and reopens it; `Err` describes a difference or failure.
@@ -160,6 +234,13 @@ pub fn roundtrip(model: &Model) -> Result<(), String> {
         .map_err(|e| format!("save: {e}"))?;
     let vault = Vault::open_bytes_with_limits(&bytes, SecretString::from(PASSWORD), &Limits::FUZZ)
         .map_err(|e| format!("reopen: {e}"))?;
+
+    let (written, read) = (snapshot(&db), snapshot(vault.database()));
+    if written != read {
+        return Err(format!(
+            "round trip changed the database:\n{written:#?}\n{read:#?}"
+        ));
+    }
 
     let mut actual = Vec::new();
     for summary in vault.list_entries() {

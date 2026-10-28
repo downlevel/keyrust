@@ -59,3 +59,19 @@
   addbb735…cbe.
 - Prove dopo le correzioni (Claude): `cargo test -p keyrust-core --features fuzzing` con KeePassXC (66 + 11 + 2 + 3 + 5
   passati), clippy core con `fuzzing`, clippy `keyrust-app` per Windows, frontend 169 test + lint + check.
+
+## Ispezione 2 — Codex codex-cli 0.164.0, sessione nuova 01a181a9-18a4-7712-835e-2d079b89799a (gpt-6.1-sol, read-only) — REVISE (1 high, 1 medium)
+- Snapshot: HEAD `9b0f008`, diff sha256 4c989023…. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i2/claudex-j6nygped/result.json`
+- I finding R01–R05 non sono stati riaperti.
+- M3C-R06 (high) un evento `locked` in ritardo (il locker lo emette dopo aver rilasciato il mutex e svuotato gli appunti)
+  può azzerare nella UI una sessione aperta nel frattempo, lasciando il backend sbloccato dietro l'Unlock → **ACCETTATO**:
+  l'evento porta `session` (la generazione avviata dal lock), la risposta di `unlock`/`create` porta la generazione della
+  sessione installata, e il frontend ignora un evento con generazione non più recente della sessione aperta. Test Vitest
+  dell'evento tardivo.
+- M3C-R07 (medium) l'oracolo del round trip confrontava solo i cinque campi standard → **ACCETTATO**: confronto del modello
+  keepass-rs riaperto (accessor `Vault::database` solo con `fuzzing`): percorsi dei gruppi, tutti i campi con il flag di
+  protezione, allegati, cronologia. Verificato con una mutazione temporanea (allegati e cronologia rimossi → test fallito).
+- **Budget di ispezione esaurito (2/2)**: le correzioni R06/R07 non sono state ispezionate da Codex.
+- Prove (Claude): `fuzz_seeds` con il nuovo oracolo, clippy core con `fuzzing`, clippy `keyrust-app` per Windows, frontend
+  lint + check + 170 test (un test di app.test.ts supera il timeout di 5 s sotto carico; da solo passa 19/19).

@@ -672,6 +672,24 @@ describe("automatic lock", () => {
 		expect(app.lockNotice).toEqual({ reason: "screenLock", minutes: 5, lostChanges: false });
 	});
 
+	it("ignores a late event about an older backend session", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const real = vault.unlock.bind(vault);
+		// The backend installed this session at generation 5.
+		vault.unlock = async (path, password) => ({ ...(await real(path, password)), session: 5 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		await app.unlock("secret");
+		// A lock that started generation 5 locked the previous session.
+		app.autoLocked("idle", 5);
+		expect(app.screen).toBe("vault");
+		expect(app.lockNotice).toBeNull();
+		// One that started generation 6 locked this one.
+		app.autoLocked("idle", 6);
+		expect(app.screen).toBe("unlock");
+		expect(app.lockNotice?.reason).toBe("idle");
+	});
+
 	it("is ignored when nothing is open or being opened", async () => {
 		const app = new AppState({ vault: new DemoVault({ delayMs: 0 }), app: new MemoryAppApi() });
 		await app.init();
