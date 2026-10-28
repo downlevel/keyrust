@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/app"]
+members = ["crates/core", "crates/app", "crates/os"]
 # cargo-fuzz targets live in their own workspace (nightly only).
 exclude = ["fuzz"]
 # The Tauri app needs platform GUI libraries (WebView2 / webkit2gtk) to build;

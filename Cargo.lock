@@ -2383,6 +2383,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyrust-os"
+version = "0.0.1"
+dependencies = [
+ "core-foundation",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
