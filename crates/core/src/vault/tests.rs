@@ -819,6 +819,28 @@ fn kdbx3_headers_keepass_rs_would_misread_are_refused() {
 }
 
 #[test]
+fn a_save_beyond_the_open_size_limit_is_refused_and_keeps_the_file() {
+    use crate::kdbx::limits::Limits;
+    let (f, mut vault) = new_vault();
+    let before = std::fs::read(&f.path).expect("read");
+    let big = EntryDraft {
+        notes: "x".repeat(4096),
+        ..draft(&vault, "Big", "pw")
+    };
+    vault.save_entry(&big).expect("entry");
+    vault.max_file_bytes = before.len() as u64 + 100;
+    assert!(matches!(vault.save(), Err(VaultError::TooExpensive)));
+    assert!(vault.is_dirty(), "unsaved changes are kept");
+    assert_eq!(
+        std::fs::read(&f.path).expect("read"),
+        before,
+        "file untouched"
+    );
+    vault.max_file_bytes = Limits::DEFAULT.max_file_bytes;
+    vault.save().expect("save within the limit");
+}
+
+#[test]
 fn reading_is_bounded_even_if_the_file_grows() {
     let (f, _vault) = new_vault();
     let path = f.path.clone();

@@ -49,6 +49,8 @@ Chiudere la Milestone 3 con tre protezioni:
      - `create`, `set_kdf` e la calibrazione non possono quindi produrre un database che Keyrust poi rifiuta.
      - Il frontend ha gli stessi `max` nei campi, sia nella creazione sia nelle impostazioni del database, e porta i
        valori digitati entro i limiti prima di inviarli (`clampKdf`, ispezione M3C-R05).
+     - Un salvataggio (anche la creazione) che produrrebbe un file oltre `max_file_bytes` è rifiutato con
+       `TooExpensive` prima di toccare il file; lo stato non salvato resta (ispezione M3C-R11).
      - Un database esistente oltre i limiti, fatto con un altro client, non si apre e mostra il messaggio
        `tooExpensive`: documentato.
    - **Decompressione — limite noto, documentato**:
@@ -125,6 +127,10 @@ Chiudere la Milestone 3 con tre protezioni:
      - il locker **ricontrolla la scadenza sotto il mutex della sessione** prima di bloccare, e l'installazione di un
        vault aggiorna l'attività sotto lo stesso mutex: una richiesta `idle` rimasta in coda (salvataggio lento, nuovo
        sblocco) non blocca una sessione in uso (ispezione M3C-R03).
+   - **Eventi e generazioni** (ispezioni M3C-R06/R08/R10): l'evento `locked` porta la generazione avviata dal lock, la
+     risposta di `unlock`/`create` quella della sessione installata. Il frontend ignora un evento non più recente della
+     sessione aperta; se arriva mentre un'apertura è in corso, lo confronta con la generazione della risposta: più
+     recente → la sessione appena aperta è chiusa (notice `interrupted`), altrimenti è ignorato.
    - **Blocco schermo** (se `lock_on_screen_lock`):
      - Linux: un thread D-Bus (`zbus`, API sincrona) ascolta `org.freedesktop.ScreenSaver.ActiveChanged(true)` sul bus
        di sessione e `org.freedesktop.login1.Manager.PrepareForSleep(true)` sul bus di sistema (anche la sospensione

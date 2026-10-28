@@ -51,8 +51,9 @@ These are design goals; most of them are implemented in Milestone 3 (see [docs/T
   authenticated, so a tampered file could ask for any amount of memory or time. Keyrust checks them
   before deriving the key and refuses files beyond Argon2 2 GiB of memory, 1000 iterations or 256 lanes,
   2·10⁹ AES-KDF rounds, or a file size of 512 MiB ("This database asks for more memory or time than
-  Keyrust allows"). The same limits bound what Keyrust itself lets you create. Reads are bounded too,
-  including the checks for external changes.
+  Keyrust allows"). The same limits bound what Keyrust itself lets you create, and a save that would
+  write a file beyond the size limit is refused (the file on disk stays as it was). Reads are bounded
+  too, including the checks for external changes.
 - **Secrets lingering in memory or leaking to logs**: secret values are held in `zeroize`/`secrecy`
   types and wiped when dropped; they are never logged, never written to disk in clear text, and the
   webview only receives secrets the user explicitly asks to reveal.

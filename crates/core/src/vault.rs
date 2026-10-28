@@ -43,6 +43,9 @@ pub struct Vault {
     /// Content of the file this model was read from or last written to.
     stamp: Option<Stamp>,
     dirty: bool,
+    /// Largest file a save may write: what opening accepts, so a save never
+    /// produces a database Keyrust then refuses.
+    max_file_bytes: u64,
     /// Lower-cased searchable text per entry, rebuilt after any change.
     index: OnceCell<Vec<(EntryId, String)>>,
 }
@@ -225,6 +228,7 @@ impl Vault {
             pending: None,
             stamp: None,
             dirty: false,
+            max_file_bytes: limits.max_file_bytes,
             index: OnceCell::new(),
         })
     }
@@ -262,6 +266,7 @@ impl Vault {
             pending: None,
             stamp: None,
             dirty: true,
+            max_file_bytes: Limits::DEFAULT.max_file_bytes,
             index: OnceCell::new(),
         };
         vault.write(None, false)?;
@@ -301,6 +306,14 @@ impl Vault {
             tracing::warn!(error = %e, "cannot serialise vault");
             VaultError::Io(std::io::ErrorKind::Other)
         })?;
+        // The file on disk and the unsaved state stay as they are.
+        if bytes.len() as u64 > self.max_file_bytes {
+            tracing::warn!(
+                bytes = bytes.len(),
+                "save refused: beyond the open size limit"
+            );
+            return Err(VaultError::TooExpensive);
+        }
         let mut durability = Ok(());
         match file::replace(&path, &bytes, expected.as_ref(), overwrite) {
             Ok(()) => {}

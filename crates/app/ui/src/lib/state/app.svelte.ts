@@ -170,6 +170,9 @@ export class AppState {
 	private toastTimer: ReturnType<typeof setInterval> | null = null;
 	/** Backend generation of the open session (from unlock / create). */
 	private backendSession: number | null = null;
+	/** A `locked` event received while a database was opening, kept until the
+	 * answer says whether it was about that session or an older one. */
+	private lockedWhileOpening: number | null = null;
 	/** When activity was last sent (ms, `performance.now()`: monotonic, so
 	 * setting the system clock back cannot silence the reports). */
 	private activitySent = -Infinity;
@@ -320,6 +323,7 @@ export class AppState {
 		this.busy = "unlock";
 		this.unlockError = null;
 		this.lockNotice = null;
+		this.lockedWhileOpening = null;
 		try {
 			const info = await this.openSession(session, () =>
 				this.api.vault.unlock(recent.path, password),
@@ -361,6 +365,7 @@ export class AppState {
 		const session = ++this.session;
 		this.busy = "create";
 		this.createError = false;
+		this.lockedWhileOpening = null;
 		try {
 			const info = await this.openSession(session, () => this.api.vault.create(options));
 			if (!info || session !== this.session) return;
@@ -381,6 +386,15 @@ export class AppState {
 	}
 
 	private async enterVault(info: DatabaseInfo, session: number) {
+		// A lock that started after this session was installed has closed it.
+		const lockedAt = this.lockedWhileOpening;
+		this.lockedWhileOpening = null;
+		if (lockedAt !== null && (info.session === undefined || lockedAt > info.session)) {
+			this.clearSession();
+			this.interrupted();
+			this.screen = this.recents.length ? "unlock" : "welcome";
+			return;
+		}
 		// Known before the reads below: a late `locked` event about an older
 		// backend session must not clear this one while they are in flight.
 		this.backendSession = info.session ?? null;
@@ -422,6 +436,11 @@ export class AppState {
 			return;
 		const opening = this.busy === "unlock" || this.busy === "create";
 		if (!this.db && !opening) return;
+		// Opening: which session the lock was about is known from the answer.
+		if (!this.db && session !== undefined) {
+			this.lockedWhileOpening = Math.max(session, this.lockedWhileOpening ?? session);
+			return;
+		}
 		const notice: LockNotice = {
 			reason: this.db ? reason : "interrupted",
 			minutes: this.settings.idle_lock_mins,
@@ -482,6 +501,7 @@ export class AppState {
 		this.lockNotice = null;
 		this.activitySent = -Infinity;
 		this.backendSession = null;
+		this.lockedWhileOpening = null;
 	}
 
 	// ---------------------------------------------------------------- leaving the editor

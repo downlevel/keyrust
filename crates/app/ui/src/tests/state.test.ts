@@ -712,6 +712,40 @@ describe("automatic lock", () => {
 		expect(lock).not.toHaveBeenCalled();
 	});
 
+	it("reconciles an event received while the unlock answer is pending", async () => {
+		const setup = async () => {
+			const vault = new DemoVault({ delayMs: 0 });
+			const real = vault.unlock.bind(vault);
+			const answer = deferred<void>();
+			// Installed at generation 5, answered only when the test says so.
+			vault.unlock = async (path, password) => {
+				const info = await real(path, password);
+				await answer.promise;
+				return { ...info, session: 5 };
+			};
+			const app = new AppState({ vault, app: new MemoryAppApi() });
+			await app.init();
+			const pending = app.unlock("secret");
+			await vi.waitFor(() => expect(app.busy).toBe("unlock"));
+			return { app, answer, pending };
+		};
+		// About an older session (it started generation 5): the unlock goes on.
+		const older = await setup();
+		older.app.autoLocked("screenLock", 5);
+		older.answer.resolve();
+		await older.pending;
+		expect(older.app.screen).toBe("vault");
+		expect(older.app.lockNotice).toBeNull();
+		// Started after the install (generation 6): this session is closed.
+		const newer = await setup();
+		newer.app.autoLocked("screenLock", 6);
+		newer.answer.resolve();
+		await newer.pending;
+		expect(newer.app.screen).toBe("unlock");
+		expect(newer.app.db).toBeNull();
+		expect(newer.app.lockNotice?.reason).toBe("interrupted");
+	});
+
 	it("is ignored when nothing is open or being opened", async () => {
 		const app = new AppState({ vault: new DemoVault({ delayMs: 0 }), app: new MemoryAppApi() });
 		await app.init();

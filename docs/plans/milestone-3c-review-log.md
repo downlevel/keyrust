@@ -85,3 +85,16 @@
 - M3C-R09 (medium) throttle dell'attività su `Date.now()`: un orologio spostato indietro silenzia i report → **ACCETTATO**:
   `performance.now()` (monotono); test con l'orologio di sistema spostato indietro di un'ora.
 - Utente: correggere e fare una quarta ispezione. Prove: frontend lint + check + formato + 172 test.
+
+## Ispezione 4 (oltre il budget, su richiesta dell'utente) — Codex, sessione nuova 01a181b7-6cb3-7760-8729-a7e7274fab25 (gpt-6.1-sol) — REVISE (2 medium)
+- Snapshot: HEAD `8d16545`, diff sha256 6cb1ebf8…. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i4/claudex-rm_07207/result.json`
+- M3C-R10 (medium) un evento vecchio arrivato mentre la risposta di uno sblocco è in attesa annullava lo sblocco (esito
+  sicuro: tutto bloccato) → **ACCETTATO**: durante un'apertura l'evento viene messo da parte e confrontato con la generazione
+  della risposta. Test con risposta differita (generazione uguale → ignorato; maggiore → chiuso), verificato con una mutazione.
+- M3C-R11 (medium) un salvataggio poteva scrivere un file oltre 512 MiB che poi non si riapre → **ACCETTATO**: `Vault::write`
+  rifiuta con `TooExpensive` prima di `file::replace`; file intatto e modifiche conservate (test con limite ridotto).
+- Piano aggiornato (criteri 1 e 4), sha256 564f49b7…; SECURITY.md aggiornato.
+- Utente: correggere entrambi e fare il push **senza un'altra ispezione**: R10 e R11 non sono stati ispezionati da Codex.
+- Prove (Claude): core con KeePassXC e `fuzzing` (67 + 11 + 2 + 3 + 5), clippy core, clippy workspace per Windows,
+  frontend lint + check + formato + 173 test.
