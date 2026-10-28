@@ -75,3 +75,13 @@
 - **Budget di ispezione esaurito (2/2)**: le correzioni R06/R07 non sono state ispezionate da Codex.
 - Prove (Claude): `fuzz_seeds` con il nuovo oracolo, clippy core con `fuzzing`, clippy `keyrust-app` per Windows, frontend
   lint + check + 170 test (un test di app.test.ts supera il timeout di 5 s sotto carico; da solo passa 19/19).
+
+## Ispezione 3 (oltre il budget, su richiesta dell'utente) — Codex, sessione nuova 01a181b1-ef2c-7512-8070-6d81e2802247 (gpt-6.1-sol) — REVISE (1 high, 1 medium)
+- Snapshot: HEAD `ee83f8b`, diff sha256 26d5c095…. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i3/claudex-4em6zhui/result.json`
+- M3C-R08 (high) `enterVault` registrava la generazione solo dopo aver caricato albero e voci: un evento tardivo in quella
+  finestra veniva accettato → **ACCETTATO**: generazione registrata prima delle letture; test con caricamento differito,
+  verificato con una mutazione (senza la correzione il test fallisce).
+- M3C-R09 (medium) throttle dell'attività su `Date.now()`: un orologio spostato indietro silenzia i report → **ACCETTATO**:
+  `performance.now()` (monotono); test con l'orologio di sistema spostato indietro di un'ora.
+- Utente: correggere e fare una quarta ispezione. Prove: frontend lint + check + formato + 172 test.

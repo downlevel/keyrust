@@ -170,7 +170,8 @@ export class AppState {
 	private toastTimer: ReturnType<typeof setInterval> | null = null;
 	/** Backend generation of the open session (from unlock / create). */
 	private backendSession: number | null = null;
-	/** When activity was last sent to the backend (ms, `Date.now()`). */
+	/** When activity was last sent (ms, `performance.now()`: monotonic, so
+	 * setting the system clock back cannot silence the reports). */
 	private activitySent = -Infinity;
 
 	readonly isDemo: boolean;
@@ -380,13 +381,15 @@ export class AppState {
 	}
 
 	private async enterVault(info: DatabaseInfo, session: number) {
+		// Known before the reads below: a late `locked` event about an older
+		// backend session must not clear this one while they are in flight.
+		this.backendSession = info.session ?? null;
 		const [tree, entries] = await Promise.all([
 			this.api.vault.tree(),
 			this.api.vault.listEntries(),
 		]);
 		if (session !== this.session) return;
 		this.db = info;
-		this.backendSession = info.session ?? null;
 		this.vaultDirty = info.dirty;
 		this.tree = tree;
 		this.entries = entries;
@@ -446,7 +449,7 @@ export class AppState {
 	 * Keyboard, pointer or wheel input. Sent to the backend at most every
 	 * `ACTIVITY_THROTTLE_MS`, only in Tauri and only with a vault open.
 	 */
-	reportActivity(now = Date.now()) {
+	reportActivity(now = performance.now()) {
 		if (this.isDemo || this.screen !== "vault") return;
 		if (now - this.activitySent < ACTIVITY_THROTTLE_MS) return;
 		this.activitySent = now;

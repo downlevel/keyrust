@@ -690,6 +690,28 @@ describe("automatic lock", () => {
 		expect(app.lockNotice?.reason).toBe("idle");
 	});
 
+	it("ignores a late event while the new session is still loading", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const real = vault.unlock.bind(vault);
+		vault.unlock = async (path, password) => ({ ...(await real(path, password)), session: 5 });
+		const lock = vi.spyOn(vault, "lock");
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		const tree = deferred<Awaited<ReturnType<DemoVault["tree"]>>>();
+		const realTree = vault.tree.bind(vault);
+		vault.tree = () => tree.promise;
+		const pending = app.unlock("secret");
+		await vi.waitFor(() => expect(app.busy).toBe("unlock"));
+		// Let the unlock answer; the tree is still loading.
+		await new Promise((r) => setTimeout(r, 0));
+		app.autoLocked("idle", 5);
+		tree.resolve(await realTree());
+		await pending;
+		expect(app.screen).toBe("vault");
+		expect(app.lockNotice).toBeNull();
+		expect(lock).not.toHaveBeenCalled();
+	});
+
 	it("is ignored when nothing is open or being opened", async () => {
 		const app = new AppState({ vault: new DemoVault({ delayMs: 0 }), app: new MemoryAppApi() });
 		await app.init();
@@ -752,6 +774,23 @@ describe("automatic lock", () => {
 		app.lock();
 		app.reportActivity(40_000);
 		expect(activity).toHaveBeenCalledTimes(2);
+	});
+
+	it("uses a monotonic clock: setting the system clock back does not silence activity", async () => {
+		const vault = asReal(new DemoVault({ delayMs: 0 }));
+		const activity = vi.spyOn(vault, "activity");
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		await app.unlock("secret");
+		const now = vi.spyOn(performance, "now").mockReturnValue(100_000);
+		const wall = vi.spyOn(Date, "now").mockReturnValue(10_000_000);
+		app.reportActivity();
+		wall.mockReturnValue(10_000_000 - 3_600_000); // an hour back
+		now.mockReturnValue(116_000);
+		app.reportActivity();
+		expect(activity).toHaveBeenCalledTimes(2);
+		now.mockRestore();
+		wall.mockRestore();
 	});
 
 	it("never reports activity in the demo", async () => {
