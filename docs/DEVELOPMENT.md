@@ -147,6 +147,18 @@ on pull requests, pushes to `main` and manual runs). With an installer from a gr
 - [ ] In DevTools, `window.__TAURI_INTERNALS__.invoke("plugin:dialog|open")` is **rejected** (the webview
       has no plugin permission)
 - [ ] Settings → General values survive a restart (they are the real `settings.json`)
+- [ ] Auto-lock, with a database open:
+  - [ ] Settings → General → lock after **1 minute**, then leave Keyrust alone: it locks and the Unlock
+        screen says "Locked after 1 minute of inactivity."; moving the mouse over the window keeps it open
+  - [ ] Lock the screen (Windows: Win+L; macOS: Ctrl+⌘+Q; Linux: the desktop's lock) and unlock it:
+        Keyrust is locked, "Locked because the screen was locked."
+  - [ ] Sleep for a few seconds and wake up, with "require password after sleep" off if possible:
+        "Locked when the computer went to sleep."
+  - [ ] With *Lock when minimized* on, minimizing locks; with it off, it does not
+  - [ ] Copied password: an automatic lock clears the clipboard like the manual one
+- [ ] A database beyond the open limits (e.g. made in KeePassXC with Argon2 memory above 2 GiB) does not
+      open and shows "This database asks for more memory or time than Keyrust allows."
+- [ ] Optional: the same database, synced, opens and saves in KeePassDX (Android) and Strongbox (iOS)
 - [ ] Optional, from source: `cargo test -p keyrust-core` (with KeePassXC installed) and
       `cd crates/app/ui; pnpm install; pnpm tauri dev`
 - [ ] Optional: in the KeePassXC GUI create two databases with password `keyrust-test-password`
