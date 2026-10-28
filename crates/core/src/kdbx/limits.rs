@@ -66,9 +66,10 @@ pub fn check(bytes: &[u8], limits: &Limits) -> Result<(), Exceeded> {
     }
     match header::peek(bytes) {
         Ok(summary) => check_kdf(&summary.kdf, limits),
+        // A malformed KDBX 3 header is rejected by the version check.
         Err(HeaderError::UnsupportedVersion { major: 3, .. }) => {
-            match kdbx3_transform_rounds(bytes) {
-                Some(rounds) if rounds > limits.max_aes_rounds => Err(Exceeded::AesRounds),
+            match header::kdbx3_transform_rounds(bytes) {
+                Ok(rounds) if rounds > limits.max_aes_rounds => Err(Exceeded::AesRounds),
                 _ => Ok(()),
             }
         }
@@ -99,25 +100,6 @@ fn check_kdf(kdf: &Kdf, limits: &Limits) -> Result<(), Exceeded> {
     }
 }
 
-/// `TransformRounds` (AES-KDF) of a KDBX 3.x header: fields are
-/// `id: u8, size: u16 LE, data`; id 6 holds a u64 LE; id 0 ends the header.
-fn kdbx3_transform_rounds(bytes: &[u8]) -> Option<u64> {
-    const TRANSFORM_ROUNDS: u8 = 6;
-    let mut pos = 12; // signatures (8) + version (4)
-    let end = bytes.len().min(header::MAX_HEADER_LEN);
-    while pos + 3 <= end {
-        let id = bytes[pos];
-        let size = usize::from(u16::from_le_bytes([bytes[pos + 1], bytes[pos + 2]]));
-        let data = bytes.get(pos + 3..pos + 3 + size)?;
-        match id {
-            0 => return None,
-            TRANSFORM_ROUNDS => return data.try_into().ok().map(u64::from_le_bytes),
-            _ => pos += 3 + size,
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,7 +123,7 @@ mod tests {
     #[test]
     fn kdbx3_rounds_are_read_and_limited() {
         let bytes = fixture("keepassxc-kdbx31.kdbx");
-        let rounds = kdbx3_transform_rounds(&bytes).expect("rounds");
+        let rounds = header::kdbx3_transform_rounds(&bytes).expect("rounds");
         assert!(rounds > 0);
         let strict = Limits {
             max_aes_rounds: rounds - 1,

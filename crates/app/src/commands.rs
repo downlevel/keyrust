@@ -301,11 +301,15 @@ pub async fn create(app: AppHandle, request: CreateRequest) -> IpcResult<Databas
 /// was read: then it is dropped (zeroized) and the answer is `locked`.
 fn install(app: &AppHandle, vault: Vault, generation: u64) -> IpcResult<DatabaseView> {
     let result = view(&vault);
-    let refused = lock(&app.state::<VaultState>().0)?.install(vault, generation);
-    if refused.is_err() {
+    let state = app.state::<VaultState>();
+    let mut session = lock(&state.0)?;
+    if let Err(refused) = session.install(vault, generation) {
+        drop(session);
+        drop(refused);
         tracing::info!("locked while opening: database discarded");
         return Err(IpcError::LOCKED);
     }
+    // Under the session mutex, so a pending idle lock sees the fresh activity.
     app.state::<AutoLock>().touch();
     Ok(result)
 }
@@ -314,11 +318,23 @@ fn install(app: &AppHandle, vault: Vault, generation: u64) -> IpcResult<Database
 /// progress and clears the clipboard if it still holds a copied value.
 /// Returns whether a vault was open. A poisoned mutex does not stop a lock.
 pub fn lock_session(state: &VaultState, clipboard: &Clipboard) -> bool {
-    let vault = state
-        .0
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .lock();
+    lock_session_if(state, clipboard, || true)
+}
+
+/// Like [`lock_session`], if `still_wanted` holds once the session mutex is
+/// taken (an idle lock re-checks the activity there: a save may have held the
+/// mutex while the user went on working).
+pub fn lock_session_if(
+    state: &VaultState,
+    clipboard: &Clipboard,
+    still_wanted: impl FnOnce() -> bool,
+) -> bool {
+    let mut session = state.0.lock().unwrap_or_else(PoisonError::into_inner);
+    if !still_wanted() {
+        return false;
+    }
+    let vault = session.lock();
+    drop(session);
     let was_open = vault.is_some();
     drop(vault);
     clipboard.clear_if_unchanged(None);

@@ -74,8 +74,12 @@ fn iso(time: Option<NaiveDateTime>) -> Option<String> {
 fn check_version(bytes: &[u8]) -> Result<()> {
     match header::peek(bytes) {
         Ok(_) => Ok(()),
-        // KDBX 3.1 is read by keepass-rs (and written back as KDBX 4).
-        Err(HeaderError::UnsupportedVersion { major: 3, .. }) => Ok(()),
+        // KDBX 3.1 is read by keepass-rs (and written back as KDBX 4), once
+        // its header is known to be one keepass-rs reads without panicking.
+        Err(HeaderError::UnsupportedVersion { major: 3, .. }) => {
+            header::kdbx3_transform_rounds(bytes).map_err(|_| VaultError::InvalidFormat)?;
+            Ok(())
+        }
         Err(HeaderError::UnsupportedVersion { major, minor }) => {
             Err(VaultError::UnsupportedVersion { major, minor })
         }

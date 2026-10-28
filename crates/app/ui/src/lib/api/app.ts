@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { AppInfo, Settings } from "./types";
+import type { AppInfo, Argon2idParams, Settings } from "./types";
 
 /** Application-level calls, backed by the Milestone 1 Tauri commands. */
 export interface AppApi {
@@ -41,6 +41,26 @@ export function normalizeSettings(s: Settings): Settings {
 		clipboard_clear_secs: clamp(s.clipboard_clear_secs, 5, 300),
 		idle_lock_mins: clamp(s.idle_lock_mins, 1, 240),
 		generator: g,
+	};
+}
+
+/**
+ * The Argon2id parameters Keyrust creates and opens: the same bounds as
+ * `kdf::validate` and the open limits in keyrust-core.
+ */
+export const KDF_LIMITS = {
+	memoryMib: { min: 8, max: 2048 },
+	iterations: { min: 1, max: 1000 },
+	parallelism: { min: 1, max: 256 },
+} as const;
+
+/** Brings typed-in Argon2id parameters within `KDF_LIMITS`. */
+export function clampKdf(p: Argon2idParams): Argon2idParams {
+	const l = KDF_LIMITS;
+	return {
+		memoryMib: clamp(p.memoryMib, l.memoryMib.min, l.memoryMib.max),
+		iterations: clamp(p.iterations, l.iterations.min, l.iterations.max),
+		parallelism: clamp(p.parallelism, l.parallelism.min, l.parallelism.max),
 	};
 }
 

@@ -33,8 +33,10 @@ Chiudere la Milestone 3 con tre protezioni:
        `TooExpensive`: nessuna allocazione illimitata.
      - Poi la KDF, dall'header.
      - KDBX 4: `kdbx::header::peek`.
-     - KDBX 3.1: si estende la lettura dell'header al campo `TransformRounds` (AES-KDF), con gli stessi controlli dei
-       limiti.
+     - KDBX 3.1: l'header viene **validato per intero come lo legge keepass-rs** (`kdbx::header::kdbx3_transform_rounds`,
+       ispezione M3C-R01/R02): campi 3 e 10 di 4 byte, 6 di 8 byte, id oltre 10 rifiutati, fine header entro 64 KiB,
+       e del `TransformRounds` conta l'**ultima** occorrenza (come keepass-rs). Un header malformato dà `InvalidFormat`
+       prima di keepass-rs (che altrimenti andrebbe in panic); i round vengono confrontati con i limiti.
    - Superare un limite dà `VaultError::TooExpensive` (nuovo), che in IPC diventa `{ kind: "tooExpensive" }` e in UI
      "This database asks for more memory or time than Keyrust allows."
    - `Vault::open_bytes_with_limits(bytes, password, &Limits)` è pubblica, per il fuzzing e i test.
@@ -45,7 +47,8 @@ Chiudere la Milestone 3 con tre protezioni:
    - **Limiti coerenti con ciò che Keyrust crea**: `kdf::validate` riceve gli stessi tetti di apertura (memoria
      ≤ 2048 MiB, iterazioni ≤ 1000, parallelismo ≤ 256).
      - `create`, `set_kdf` e la calibrazione non possono quindi produrre un database che Keyrust poi rifiuta.
-     - Il frontend ha gli stessi `max` nei campi.
+     - Il frontend ha gli stessi `max` nei campi, sia nella creazione sia nelle impostazioni del database, e porta i
+       valori digitati entro i limiti prima di inviarli (`clampKdf`, ispezione M3C-R05).
      - Un database esistente oltre i limiti, fatto con un altro client, non si apre e mostra il messaggio
        `tooExpensive`: documentato.
    - **Decompressione — limite noto, documentato**:
@@ -118,7 +121,10 @@ Chiudere la Milestone 3 con tre protezioni:
      - il frontend chiama il comando `activity` a ogni input (tasti, puntatore, rotella), al massimo una volta ogni
        15 s;
      - un thread controlla ogni 5 s e, con un vault aperto e un'inattività di almeno `idle_lock_mins`, esegue il
-       lock (drop del `Vault`, svuotamento degli appunti) ed emette l'evento `locked` con `{ reason: "idle" }`.
+       lock (drop del `Vault`, svuotamento degli appunti) ed emette l'evento `locked` con `{ reason: "idle" }`;
+     - il locker **ricontrolla la scadenza sotto il mutex della sessione** prima di bloccare, e l'installazione di un
+       vault aggiorna l'attività sotto lo stesso mutex: una richiesta `idle` rimasta in coda (salvataggio lento, nuovo
+       sblocco) non blocca una sessione in uso (ispezione M3C-R03).
    - **Blocco schermo** (se `lock_on_screen_lock`):
      - Linux: un thread D-Bus (`zbus`, API sincrona) ascolta `org.freedesktop.ScreenSaver.ActiveChanged(true)` sul bus
        di sessione e `org.freedesktop.login1.Manager.PrepareForSleep(true)` sul bus di sistema (anche la sospensione

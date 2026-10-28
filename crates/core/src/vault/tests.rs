@@ -782,6 +782,43 @@ fn files_beyond_the_limits_are_refused_before_the_kdf() {
 }
 
 #[test]
+fn kdbx3_headers_keepass_rs_would_misread_are_refused() {
+    use crate::kdbx::limits::Limits;
+    let original = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/keepassxc-kdbx31.kdbx"),
+    )
+    .expect("fixture");
+    // A field inserted right after the version, before KeePassXC's own ones.
+    let with = |field: &[u8]| {
+        let mut bytes = original[..12].to_vec();
+        bytes.extend_from_slice(field);
+        bytes.extend_from_slice(&original[12..]);
+        bytes
+    };
+    // Empty or short fixed-width fields: keepass-rs would panic reading them.
+    for field in [&[6u8, 0, 0][..], &[3, 2, 0, 1, 0], &[10, 0, 0]] {
+        let result =
+            Vault::open_bytes_with_limits(&with(field), secret(FIXTURE_PASSWORD), &Limits::DEFAULT);
+        assert!(
+            matches!(result, Err(VaultError::InvalidFormat)),
+            "{field:?}"
+        );
+    }
+    // A cheap first TransformRounds does not hide an expensive later one:
+    // keepass-rs uses the last, and so does the check.
+    let mut cheap = vec![6u8, 8, 0];
+    cheap.extend_from_slice(&1u64.to_le_bytes());
+    let strict = Limits {
+        max_aes_rounds: 1,
+        ..Limits::DEFAULT
+    };
+    let start = Instant::now();
+    let result = Vault::open_bytes_with_limits(&with(&cheap), secret(FIXTURE_PASSWORD), &strict);
+    assert!(matches!(result, Err(VaultError::TooExpensive)));
+    assert!(start.elapsed().as_millis() < 50, "refused before the KDF");
+}
+
+#[test]
 fn reading_is_bounded_even_if_the_file_grows() {
     let (f, _vault) = new_vault();
     let path = f.path.clone();

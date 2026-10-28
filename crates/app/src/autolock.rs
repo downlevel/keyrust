@@ -20,7 +20,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::clipboard::Clipboard;
-use crate::commands::{SettingsState, VaultState, lock_session};
+use crate::commands::{SettingsState, VaultState, lock_session_if};
 
 /// Event sent to the UI after an automatic lock.
 pub const LOCKED_EVENT: &str = "locked";
@@ -124,16 +124,27 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
 
 fn locker(app: &AppHandle, reason: Reason) {
     let settings = app.state::<SettingsState>();
-    let wanted = settings
+    let (wanted, minutes) = settings
         .current
         .lock()
-        .map(|s| policy::should_lock(reason, &s))
+        .map(|s| (policy::should_lock(reason, &s), s.idle_lock_mins))
         // Unreadable settings: lock, the safe side.
-        .unwrap_or(true);
+        .unwrap_or((true, 1));
     if !wanted {
         return;
     }
-    let was_open = lock_session(&app.state::<VaultState>(), &app.state::<Clipboard>());
+    // An idle request may be stale (queued while a save held the session, or
+    // before another unlock): it acts only if the delay is still over.
+    let autolock = app.state::<AutoLock>();
+    let still_wanted = || {
+        reason != Reason::Idle
+            || policy::idle_expired(autolock.last_activity(), Instant::now(), minutes)
+    };
+    let was_open = lock_session_if(
+        &app.state::<VaultState>(),
+        &app.state::<Clipboard>(),
+        still_wanted,
+    );
     if was_open {
         tracing::info!(?reason, "vault locked automatically");
         let _ = app.emit(LOCKED_EVENT, Locked { reason });

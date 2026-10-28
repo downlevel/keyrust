@@ -84,8 +84,18 @@ fn generate_fuzz_seeds() {
 #[test]
 fn committed_seeds_open_under_the_fuzz_limits() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/vault_open_bytes");
-    for entry in std::fs::read_dir(dir).expect("corpus") {
-        let bytes = std::fs::read(entry.expect("entry").path()).expect("seed");
+    // `seed-*` are ours; others (the KDBX 3.1 fixture) only explore headers.
+    let seeds: Vec<_> = std::fs::read_dir(dir)
+        .expect("corpus")
+        .map(|e| e.expect("entry").path())
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("seed-"))
+        })
+        .collect();
+    assert_eq!(seeds.len(), 2, "{seeds:?}");
+    for path in seeds {
+        let bytes = std::fs::read(path).expect("seed");
         Vault::open_bytes_with_limits(&bytes, SecretString::from(fuzzing::PASSWORD), &Limits::FUZZ)
             .expect("seed opens");
     }

@@ -4,6 +4,7 @@
 	import * as Dialog from "$lib/components/ui/dialog/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import type { Argon2idParams, Cipher, StrengthEstimate } from "$lib/api";
+	import { clampKdf, KDF_LIMITS } from "$lib/api/app";
 	import { estimateStrength } from "$lib/api/strength";
 	import SecretInput from "./SecretInput.svelte";
 	import StrengthMeter from "./StrengthMeter.svelte";
@@ -54,7 +55,9 @@
 
 	async function setKdf(patch: Partial<Argon2idParams>) {
 		if (!params) return;
-		await app.updateDatabase({ kdf: { ...params, ...patch } });
+		// Out-of-range values are brought within the limits; the field then
+		// shows the value actually stored.
+		await app.updateDatabase({ kdf: clampKdf({ ...params, ...patch }) });
 	}
 
 	/** Measures this computer; also how AES-KDF / Argon2d switch to Argon2id. */
@@ -319,7 +322,8 @@
 											<label class="flex flex-col gap-1 text-[13px]"
 												>{m.kdf_memory()}<input
 													type="number"
-													min="8"
+													min={KDF_LIMITS.memoryMib.min}
+													max={KDF_LIMITS.memoryMib.max}
 													class="{input} font-mono"
 													value={params.memoryMib}
 													onchange={(e) =>
@@ -334,7 +338,8 @@
 											<label class="flex flex-col gap-1 text-[13px]"
 												>{m.kdf_iterations()}<input
 													type="number"
-													min="1"
+													min={KDF_LIMITS.iterations.min}
+													max={KDF_LIMITS.iterations.max}
 													class="{input} font-mono"
 													value={params.iterations}
 													onchange={(e) =>
@@ -349,7 +354,8 @@
 											<label class="flex flex-col gap-1 text-[13px]"
 												>{m.kdf_parallelism()}<input
 													type="number"
-													min="1"
+													min={KDF_LIMITS.parallelism.min}
+													max={KDF_LIMITS.parallelism.max}
 													class="{input} font-mono"
 													value={params.parallelism}
 													onchange={(e) =>

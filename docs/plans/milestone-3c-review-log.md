@@ -37,3 +37,25 @@
 - Il polling dello schermo (Windows, macOS) agisce sul **fronte** bloccato/sbloccato, non a ogni giro.
 - La logica pura (`Session`, `idle_expired`, `suspended`, `should_lock`) sta in `crates/app/src/autolock/policy.rs`;
   verificata in locale con un crate di prova che la include, il resto con `cargo clippy --target x86_64-pc-windows-msvc`.
+
+## Ispezione 1 — Codex codex-cli 0.164.0, sessione nuova 01a1819b-d830-7d51-8e1b-167567550c28 (modello effettivo gpt-6.1-sol, sandbox read-only) — REVISE (2 high, 2 medium, 1 low)
+- Snapshot: base `1f07b58`, HEAD `d98233e`, diff sha256 a6386940…8199. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i1/claudex-szgsw7y9/result.json`
+- M3C-R01 (high) KDBX 3: il controllo leggeva il **primo** `TransformRounds`, keepass-rs usa l'**ultimo**; un header oltre 64 KiB
+  passava → **ACCETTATO** (verificato in keepass-rs 0.17 `format/kdbx3.rs`; in più un campo da 9 byte veniva accettato
+  e keepass-rs ne legge i primi 8). Nuovo `kdbx::header::kdbx3_transform_rounds`: ultima occorrenza, larghezze esatte,
+  id ≤ 10, fine header entro il tetto, altrimenti errore.
+- M3C-R02 (high) header KDBX 3 malformati arrivano alle letture non controllate di keepass-rs (panic) → **ACCETTATO**:
+  `check_version` rifiuta con `InvalidFormat` ogni header che non passa la validazione. Test unitari e a livello di
+  vault sulla fixture KeePassXC 3.1 con campi inseriti; fixture 3.1 aggiunta al corpus (`kdbx31-header.kdbx`).
+  Il lato KDBX 4 (`header::peek`) era già rigoroso e coerente con keepass-rs (ultima occorrenza vince).
+- M3C-R03 (medium) richiesta idle obsoleta dopo un salvataggio lento → **ACCETTATO**: `lock_session_if` ricontrolla la
+  scadenza sotto il mutex della sessione; `install` aggiorna l'attività sotto lo stesso mutex.
+- M3C-R04 (medium) CI non esegue i test di `keyrust-os` né `fuzz_seeds` → **ACCETTATO**: step `Test (core, fuzzing harness)`
+  e `Test (os)` nel job core sui tre OS.
+- M3C-R05 (low) campi KDF delle impostazioni del database senza `max` → **ACCETTATO**: `KDF_LIMITS` e `clampKdf` condivisi
+  da creazione e impostazioni.
+- Piano aggiornato nei passaggi interessati (criterio 1 KDBX 3.1 e frontend, criterio 4 inattività): nuovo sha256
+  addbb735…cbe.
+- Prove dopo le correzioni (Claude): `cargo test -p keyrust-core --features fuzzing` con KeePassXC (66 + 11 + 2 + 3 + 5
+  passati), clippy core con `fuzzing`, clippy `keyrust-app` per Windows, frontend 169 test + lint + check.

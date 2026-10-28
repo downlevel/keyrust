@@ -744,3 +744,19 @@ describe("automatic lock", () => {
 		expect(activity).not.toHaveBeenCalled();
 	});
 });
+
+describe("KDF limits in the forms", () => {
+	it("brings typed-in parameters within the limits Keyrust opens", async () => {
+		const { clampKdf } = await import("$lib/api/app");
+		expect(clampKdf({ memoryMib: 5000, iterations: 0, parallelism: 300 })).toEqual({
+			memoryMib: 2048,
+			iterations: 1,
+			parallelism: 256,
+		});
+		expect(clampKdf({ memoryMib: 64, iterations: 3, parallelism: 2 })).toEqual({
+			memoryMib: 64,
+			iterations: 3,
+			parallelism: 2,
+		});
+	});
+});

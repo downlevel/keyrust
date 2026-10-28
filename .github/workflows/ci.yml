@@ -79,6 +79,12 @@ jobs:
         if: failure()
         shell: bash
         run: python3 .github/scripts/annotate_test_failures.py test-output.txt
+      # The committed fuzz seeds still open, and the round-trip harness holds.
+      - name: Test (core, fuzzing harness)
+        run: cargo test -p keyrust-core --features fuzzing --test fuzz_seeds
+      # Screen-lock state and the Windows suspend registration, on each OS.
+      - name: Test (os)
+        run: cargo test -p keyrust-os
 
   app:
     name: app (${{ matrix.os }})
