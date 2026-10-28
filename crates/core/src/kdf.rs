@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 
 use crate::model::Argon2idParams;
 
-/// Largest memory keepass-rs can store: it converts bytes to KiB as `u32`.
-pub const MAX_MEMORY_MIB: u32 = u32::MAX / 1024;
-/// Argon2 allows at most 2^24 - 1 lanes.
-pub const MAX_PARALLELISM: u32 = 0x00FF_FFFF;
+/// The same ceilings as opening (`kdbx::limits::Limits::DEFAULT`), so Keyrust
+/// never writes a database it would then refuse to open.
+pub const MAX_MEMORY_MIB: u32 = 2048;
+pub const MAX_PARALLELISM: u32 = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum KdfError {
@@ -26,7 +26,7 @@ pub fn validate(params: &Argon2idParams) -> Result<(), KdfError> {
     if !(1..=MAX_PARALLELISM).contains(&params.parallelism) {
         return Err(KdfError::Invalid("parallelism"));
     }
-    if params.iterations < 1 {
+    if !(1..=MAX_ITERATIONS).contains(&params.iterations) {
         return Err(KdfError::Invalid("iterations"));
     }
     let memory_kib = u64::from(params.memory_mib) * 1024;
@@ -105,23 +105,34 @@ mod tests {
             parallelism,
         };
         assert!(validate(&p(8, 1, 1)).is_ok());
-        assert!(validate(&p(MAX_MEMORY_MIB, 1, 4)).is_ok());
+        assert!(validate(&p(MAX_MEMORY_MIB, MAX_ITERATIONS, MAX_PARALLELISM)).is_ok());
         assert_eq!(validate(&p(7, 1, 1)), Err(KdfError::Invalid("memory")));
         assert_eq!(
             validate(&p(MAX_MEMORY_MIB + 1, 1, 1)),
             Err(KdfError::Invalid("memory"))
         );
         assert_eq!(validate(&p(8, 0, 1)), Err(KdfError::Invalid("iterations")));
-        assert_eq!(validate(&p(8, 1, 0)), Err(KdfError::Invalid("parallelism")));
-        // 8 MiB = 8192 KiB: at most 1024 lanes of 8 KiB each.
-        assert!(validate(&p(8, 1, 1024)).is_ok());
         assert_eq!(
-            validate(&p(8, 1, 2048)),
-            Err(KdfError::Invalid("memory per lane"))
+            validate(&p(8, MAX_ITERATIONS + 1, 1)),
+            Err(KdfError::Invalid("iterations"))
+        );
+        assert_eq!(validate(&p(8, 1, 0)), Err(KdfError::Invalid("parallelism")));
+        assert_eq!(
+            validate(&p(8, 1, MAX_PARALLELISM + 1)),
+            Err(KdfError::Invalid("parallelism"))
         );
         assert_eq!(
             calibrate(8, 2048, TARGET),
-            Err(KdfError::Invalid("memory per lane"))
+            Err(KdfError::Invalid("parallelism"))
         );
+    }
+
+    #[test]
+    fn creatable_parameters_always_open() {
+        use crate::kdbx::limits::Limits;
+        let max = Limits::DEFAULT;
+        assert!(u64::from(MAX_MEMORY_MIB) * 1024 * 1024 <= max.max_argon2_memory_bytes);
+        assert!(u64::from(MAX_ITERATIONS) <= max.max_argon2_iterations);
+        assert!(MAX_PARALLELISM <= max.max_argon2_parallelism);
     }
 }

@@ -1,7 +1,7 @@
 //! File primitives: content stamps, the save lock and atomic replacement.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -26,17 +26,41 @@ impl Stamp {
 
 /// Whether the file at `path` still has the content `expected`. A missing
 /// file counts as changed.
+///
+/// Bounded: the length is compared first, and at most the expected length
+/// plus one byte is read and hashed, so a replaced huge file costs nothing.
 pub(crate) fn unchanged(path: &Path, expected: &Stamp) -> io::Result<bool> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Stamp::of(&bytes) == *expected),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e),
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if file.metadata()?.len() != expected.len {
+        return Ok(false);
     }
+    let mut hasher = Sha256::new();
+    let read = io::copy(&mut file.take(expected.len + 1), &mut hasher)?;
+    Ok(read == expected.len && <[u8; 32]>::from(hasher.finalize()) == expected.hash)
+}
+
+/// Reads a whole file from one handle, refusing more than `max` bytes even if
+/// it grows while being read. `None` means it is too large.
+pub(crate) fn read_limited(path: &Path, max: u64) -> io::Result<Option<Vec<u8>>> {
+    let file = File::open(path)?;
+    let len = file.metadata()?.len();
+    if len > max {
+        return Ok(None);
+    }
+    fire(Phase::OpenBeforeRead);
+    let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+    file.take(max + 1).read_to_end(&mut bytes)?;
+    Ok((bytes.len() as u64 <= max).then_some(bytes))
 }
 
 /// Points where tests inject a concurrent writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Phase {
+    OpenBeforeRead,
     OpenAfterRead,
     SaveAfterFirstCheck,
     SaveAfterFsync,

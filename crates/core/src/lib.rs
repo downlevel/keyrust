@@ -9,6 +9,8 @@
 
 pub mod error;
 mod file;
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing;
 pub mod generator;
 pub mod kdbx;
 pub mod kdf;

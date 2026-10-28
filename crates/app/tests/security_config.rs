@@ -109,6 +109,7 @@ fn ipc_commands_are_the_expected_ones() {
             "unlock",
             "create",
             "lock_vault",
+            "activity",
             "database_info",
             "tree",
             "list_entries",

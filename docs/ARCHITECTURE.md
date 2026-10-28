@@ -25,13 +25,13 @@
 │  Frontend (Svelte 5, webview)          Backend Tauri (Rust)                  │
 │  ┌───────────────────────────┐  IPC   ┌───────────────────────────────────┐  │
 │  │ Unlock / Vault / Settings │◀──────▶│ commands.rs  (API tipizzata)      │  │
-│  │ store UI (no segreti      │ invoke │ state.rs     (Mutex<Option<Vault>>)│  │
-│  │ persistenti)              │ events │ lock.rs      (idle timer, screen  │  │
-│  └───────────────────────────┘        │               lock listener)      │  │
-│                                       │ clipboard.rs (arboard + auto-clear)│  │
-│                                       └─────────────────┬─────────────────┘  │
-└─────────────────────────────────────────────────────────┼────────────────────┘
-                                                          │ API Rust
+│  │ store UI (no segreti      │ invoke │ autolock.rs  (Session, locker,    │  │
+│  │ persistenti)              │ events │               trigger)            │  │
+│  └───────────────────────────┘        │ clipboard.rs (arboard, auto-clear)│  │
+│                                       └──────┬──────────┬─────────────────┘  │
+└──────────────────────────────────────────────┼──────────┼────────────────────┘
+                     crates/os (unsafe FFI) ◀──┘          │
+                     blocco schermo, sospensione          │ API Rust
 ┌──────────────────────────── crates/core ────────────────▼────────────────────┐
 │ vault.rs     Vault: open / create / save (atomico) / lock                    │
 │ model.rs     viste su gruppi e voci (EntryId, GroupId, EntrySummary…)        │
@@ -39,6 +39,7 @@
 │ generator.rs generatore password (OsRng) + stima robustezza                  │
 │ kdf.rs       parametri Argon2id, calibrazione                                │
 │ kdbx/header.rs  lettura header KDBX4 senza crittografia (limiti KDF)          │
+│ kdbx/limits.rs  tetti di apertura (memoria/iterazioni/lane, round, dimensione)│
 │ settings.rs  impostazioni app (JSON, scrittura atomica, nessun segreto)      │
 │ error.rs     errori tipizzati (thiserror), senza segreti nei messaggi        │
 │      └── keepass-rs (KDBX4 parse/serialize) ── RustCrypto                    │
@@ -53,6 +54,7 @@ keyrust/
 ├── Cargo.toml              # workspace
 ├── crates/
 │   ├── core/               # nessuna dipendenza da Tauri/UI
+│   ├── os/                 # blocco schermo e sospensione; unico crate con unsafe (FFI)
 │   └── app/                # Tauri 2 (src-tauri) + frontend Svelte (ui/)
 ├── fuzz/                   # cargo-fuzz
 ├── tests/fixtures/         # file .kdbx creati con KeePassXC
@@ -142,15 +144,39 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
   - Il vault lavora sul percorso reale del file (i link simbolici vengono risolti all'apertura), così il salvataggio
     aggiorna il file di destinazione e non sostituisce il link.
   - I parametri Argon2id sono validati per intero (`kdf::validate`: limiti di keepass-rs e di Argon2, almeno 8 KiB per
-    lane) prima di toccare il vault.
+    lane, e gli stessi tetti dell'apertura) prima di toccare il vault.
+- **Limiti di apertura** (`crates/core/src/kdbx/limits.rs`): `Vault::open`, `open_bytes` e `reload` leggono il file
+  da una sola handle con `take(max + 1)` (512 MiB), poi controllano i parametri KDF dall'header (KDBX 4 e 3.1) prima
+  di qualsiasi derivazione: Argon2 ≤ 2 GiB / 1000 iterazioni / 256 lane, AES-KDF ≤ 2·10⁹ round. Oltre →
+  `VaultError::TooExpensive` (IPC `tooExpensive`). Anche il controllo di modifica esterna (`file::unchanged`) confronta
+  prima la lunghezza e poi calcola SHA-256 in streaming senza leggere oltre. La decompressione resta senza tetto
+  (avviene solo dopo l'HMAC con la chiave dell'utente): limite documentato in `SECURITY.md`.
   - Il `Debug` di tutte le viste (`EntrySummary`, `EntryDetail`, `GroupNode`, `DatabaseInfo`, `EntryDraft`, `Vault`)
     mostra solo identificatori e conteggi.
 - **Auto-clear clipboard**: dopo la copia parte un timer; alla scadenza svuota gli appunti **solo se** contengono
   ancora il valore copiato (confronto su hash, così non cancella ciò che l'utente ha copiato dopo).
   Hint di esclusione dalla cronologia (KDE/Windows) dove `arboard` lo supporta. Svuotamento anche al lock e all'uscita.
-- **Auto-lock**: timer di inattività resettato dagli eventi di input del frontend; listener del blocco schermo
-  per piattaforma (Linux: D-Bus `org.freedesktop.login1` / `ScreenSaver`; Windows: `WTSRegisterSessionNotification`;
-  macOS: `com.apple.screenIsLocked`). Il lock fa il drop del `Vault` (zeroize) e il frontend torna alla schermata di sblocco.
+- **Auto-lock** (`crates/app/src/autolock.rs`, decisioni pure in `autolock/policy.rs`), tutto nel processo Rust:
+  - `VaultState` contiene una `Session`: il vault e una **generazione** incrementata da ogni lock (manuale o
+    automatico). `unlock` e `create` la leggono prima della KDF e installano il vault solo se è invariata;
+    altrimenti lo scartano (zeroize) e rispondono `locked`. Un blocco durante uno sblocco lento non viene annullato.
+  - Ogni trigger invia un `Reason` (`idle`, `screenLock`, `suspend`, `minimize`) a **un solo thread locker**, che
+    applica le impostazioni (`should_lock`), esegue il lock (drop del `Vault`, svuotamento degli appunti) ed emette
+    l'evento `locked` con `{ reason }`. I trigger non attendono mai il mutex del vault, che un salvataggio tiene
+    durante la KDF.
+  - **Inattività**: il frontend chiama `activity` a ogni input, al massimo ogni 15 s; un thread controlla ogni 5 s.
+  - **Blocco schermo**: Windows e macOS con polling ogni 2 s di `keyrust_os::screen_locked()` (sul fronte di
+    blocco); Linux con `keyrust_os::on_screen_lock` (`ActiveChanged(true)` di un'interfaccia `*.ScreenSaver` sul bus
+    di sessione).
+  - **Sospensione**: Windows `PowerRegisterSuspendResumeNotification` (callback, senza finestra), Linux logind
+    `PrepareForSleep(true)`; ovunque un thread a 1 s che riconosce un salto dell'orologio di parete oltre 4 s
+    (unico rilevatore su macOS).
+  - **Minimizzazione**: `WindowEvent::Resized` con la finestra minimizzata.
+  - Il frontend, all'evento `locked`, azzera lo stato come il Lock (senza richiamare il backend) e mostra la notice
+    del motivo sulla schermata di sblocco.
+- **`crates/os`** (`keyrust-os`): le poche chiamate al sistema operativo che servono all'auto-lock. È l'unico crate
+  con `unsafe` (FFI Windows e macOS), negato a livello di crate e ammesso funzione per funzione con un commento
+  `SAFETY:`; la parte Linux usa `zbus` ed è safe.
 
 ## Deploy
 - **Ambienti**: solo locale (`cargo tauri dev`) + release.
@@ -171,8 +197,9 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
   - *Round-trip lossless*: apri fixture → salva → riapri con `keepassxc-cli` → nessuna differenza nell'export XML.
 - **Test di sicurezza**: test che verificano che `Debug`/log non contengano segreti; clippy con lint su `unwrap`
   nei percorsi critici; `cargo audit` / `cargo deny` in CI.
-- **Fuzzing**: `cargo-fuzz` (`fuzz/`): oggi `kdbx_header_peek` su `kdbx::header::peek`; il target su `Database::parse`
-  arriva in Milestone 3 insieme ai limiti KDF (vedi `fuzz/README.md`). Corpus dalle fixture; 60 s per target in CI.
+- **Fuzzing**: `cargo-fuzz` (`fuzz/`): `kdbx_header_peek` (header), `vault_open_bytes` (file interi con limiti
+  minimi, corpus di semi generati con keepass-rs) e `vault_roundtrip` (contenuto arbitrario salvato e riaperto).
+  60 s per target in CI, corsa lunga manuale con `workflow_dispatch` (vedi `fuzz/README.md`).
 - **Frontend**: Vitest per store e componenti; Playwright/WebDriver (tauri-driver) per uno smoke e2e su Linux.
 - **CI** (`.github/workflows/ci.yml`): job `core` e `app` su Linux/Windows/macOS (fmt, clippy, test con KeePassXC,
   check/lint/test frontend, build Tauri debug non firmata caricata come artifact), `deny`, `fuzz`. Action fissate a SHA.

@@ -227,6 +227,61 @@ pub fn peek(data: &[u8]) -> Result<HeaderSummary, HeaderError> {
     })
 }
 
+/// Validates the outer header of a KDBX 3.x file the way keepass-rs 0.17
+/// reads it, and returns its AES-KDF `TransformRounds`.
+///
+/// keepass-rs reads fixed-width fields with unchecked reads (a short field
+/// panics, a longer one is truncated) and keeps the **last** occurrence of a
+/// repeated field, so a file must pass this check before it is handed over:
+/// fields are `id: u8, size: u16 LE, data`; ids above 10 are invalid;
+/// compression (3) and inner stream id (10) are exactly 4 bytes, the rounds
+/// (6) exactly 8; the header must end (id 0) within [`MAX_HEADER_LEN`].
+pub fn kdbx3_transform_rounds(data: &[u8]) -> Result<u64, HeaderError> {
+    const FIELD_COMMENT: u8 = 1;
+    const FIELD_TRANSFORM_ROUNDS: u8 = 6;
+    const FIELD_INNER_STREAM: u8 = 10;
+    let mut r = Reader {
+        data: &data[..data.len().min(MAX_HEADER_LEN)],
+    };
+    if r.take(4)? != SIGNATURE_1 || r.take(4)? != SIGNATURE_2 {
+        return Err(HeaderError::InvalidSignature);
+    }
+    let _minor = r.u16()?;
+    if r.u16()? != 3 {
+        return Err(HeaderError::InvalidField("version"));
+    }
+    let mut rounds = None;
+    loop {
+        let field = r.u8().and_then(|id| {
+            let len = usize::from(r.u16()?);
+            Ok((id, r.take(len)?))
+        });
+        let (id, value) = match field {
+            Ok(field) => field,
+            Err(HeaderError::Truncated) if data.len() > MAX_HEADER_LEN => {
+                return Err(HeaderError::TooLarge);
+            }
+            Err(e) => return Err(e),
+        };
+        match id {
+            FIELD_END => break,
+            FIELD_COMMENT | FIELD_CIPHER_ID | 4 | 5 | 7 | 8 | 9 => {}
+            FIELD_COMPRESSION if value.len() == 4 => {}
+            FIELD_INNER_STREAM if value.len() == 4 => {}
+            FIELD_TRANSFORM_ROUNDS => {
+                let value: [u8; 8] = value
+                    .try_into()
+                    .map_err(|_| HeaderError::InvalidField("transform rounds"))?;
+                rounds = Some(u64::from_le_bytes(value));
+            }
+            FIELD_COMPRESSION => return Err(HeaderError::InvalidField("compression")),
+            FIELD_INNER_STREAM => return Err(HeaderError::InvalidField("inner stream")),
+            _ => return Err(HeaderError::InvalidField("unknown KDBX 3 field")),
+        }
+    }
+    rounds.ok_or(HeaderError::MissingField("transform rounds"))
+}
+
 /// Value of a KeePass `VariantDictionary` item. Every type of the format is
 /// validated (width, UTF-8, boolean value); the KDF only uses some of them.
 enum Variant<'a> {
@@ -517,6 +572,89 @@ mod tests {
         }
         params.push(VARIANT_END);
         assert!(peek(&with(vec![], params)).is_ok());
+    }
+
+    fn kdbx3(fields: &[(u8, Vec<u8>)]) -> Vec<u8> {
+        let mut out = [SIGNATURE_1, SIGNATURE_2].concat();
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&3u16.to_le_bytes());
+        for (id, value) in fields {
+            out.push(*id);
+            out.extend_from_slice(&u16::try_from(value.len()).unwrap().to_le_bytes());
+            out.extend_from_slice(value);
+        }
+        out
+    }
+
+    fn kdbx3_valid(rounds: u64) -> Vec<(u8, Vec<u8>)> {
+        vec![
+            (2, CIPHER_AES256.to_vec()),
+            (3, 1u32.to_le_bytes().to_vec()),
+            (4, vec![1; 32]),
+            (5, vec![2; 32]),
+            (6, rounds.to_le_bytes().to_vec()),
+            (7, vec![3; 16]),
+            (8, vec![4; 32]),
+            (9, vec![5; 32]),
+            (10, 2u32.to_le_bytes().to_vec()),
+            (0, b"\r\n\r\n".to_vec()),
+        ]
+    }
+
+    #[test]
+    fn kdbx3_rounds_follow_keepass_rs() {
+        assert_eq!(kdbx3_transform_rounds(&kdbx3(&kdbx3_valid(6000))), Ok(6000));
+        // keepass-rs keeps the last occurrence: so does the check.
+        let mut fields = kdbx3_valid(10);
+        fields.insert(8, (6, u64::MAX.to_le_bytes().to_vec()));
+        assert_eq!(kdbx3_transform_rounds(&kdbx3(&fields)), Ok(u64::MAX));
+    }
+
+    #[test]
+    fn kdbx3_rejects_what_keepass_rs_would_misread() {
+        let with = |id: u8, value: Vec<u8>| {
+            let mut fields = kdbx3_valid(10);
+            fields.insert(0, (id, value));
+            kdbx3_transform_rounds(&kdbx3(&fields))
+        };
+        // Short fields would panic in keepass-rs, long ones would be truncated.
+        for (id, value) in [
+            (6, vec![]),
+            (6, vec![0; 7]),
+            (6, vec![0xff; 9]),
+            (3, vec![]),
+            (3, vec![0; 5]),
+            (10, vec![0; 3]),
+        ] {
+            assert!(
+                matches!(with(id, value.clone()), Err(HeaderError::InvalidField(_))),
+                "{id} {value:?}"
+            );
+        }
+        assert_eq!(
+            with(11, vec![]),
+            Err(HeaderError::InvalidField("unknown KDBX 3 field"))
+        );
+        let no_rounds: Vec<_> = kdbx3_valid(1).into_iter().filter(|f| f.0 != 6).collect();
+        assert_eq!(
+            kdbx3_transform_rounds(&kdbx3(&no_rounds)),
+            Err(HeaderError::MissingField("transform rounds"))
+        );
+    }
+
+    #[test]
+    fn kdbx3_headers_must_end_within_the_cap() {
+        // Rounds hidden after 64 KiB of comments cannot be checked: rejected.
+        let mut fields = vec![(1, vec![0; 60_000]), (1, vec![0; 10_000])];
+        fields.extend(kdbx3_valid(u64::MAX));
+        assert_eq!(
+            kdbx3_transform_rounds(&kdbx3(&fields)),
+            Err(HeaderError::TooLarge)
+        );
+        let valid = kdbx3(&kdbx3_valid(10));
+        for len in 0..valid.len() {
+            assert!(kdbx3_transform_rounds(&valid[..len]).is_err(), "{len}");
+        }
     }
 
     #[test]

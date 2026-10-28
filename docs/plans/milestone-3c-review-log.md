@@ -1,0 +1,100 @@
+# Log di revisione — Milestone 3c (auto-lock, limiti KDF, fuzzing)
+
+- Ruoli: host/planner/builder **Claude** (Claude Code, Opus 5.5), reviewer e inspector **Codex** (CLI, modello di default).
+- Piano: `docs/plans/milestone-3c.md`. Base `1f07b58`, branch `milestone-3c`.
+- Autorizzazione: "procedi con la 3c" (piano + implementazione); push solo sul branch.
+- Decisioni utente: mini-crate `crates/os` con unsafe isolato per il blocco schermo su Windows/macOS; limiti generosi in apertura (Argon2 2 GiB / 1000 iterazioni / 256 lane, AES-KDF 2·10⁹ round, file 512 MiB).
+- Limiti: MAX_ROUNDS=5, MAX_FIX_ROUNDS=2, MAX_INSPECTION_ROUNDS=2, inspect=on.
+
+## Round 1 — Codex codex-cli 0.164.0 (sessione 01a17fba-60b9-7200-8fc7-7787024d3181) — REVISE (4 high, 2 medium) — plan sha256 f64524cd…917
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3cr1/claudex-yk7s92zu/result.json`
+- M3C-01 (high) fuzzing fermo all'HMAC → ACCETTATO in parte: target strutturato `vault_roundtrip`; XML ostile oltre l'HMAC
+  non raggiungibile (nessun parser pubblico in keepass-rs, serve la chiave) → limite documentato e proposto upstream.
+- M3C-02 semi Argon2 impossibili con `Vault::create` → ACCETTATO: semi generati direttamente con keepass-rs e verificati.
+- M3C-03 (high) limiti in apertura incoerenti con `kdf::validate` → ACCETTATO: stessi tetti in validazione e frontend.
+- M3C-04 (high) letture non limitate (anche nei controlli di modifica esterna) → ACCETTATO: lettura limitata da una handle,
+  confronto della lunghezza e hash in streaming.
+- M3C-05 (high) uno sblocco in corso poteva reinstallare il vault dopo un auto-lock → ACCETTATO: generazione di sessione nel backend.
+- M3C-06 (high) decompressione illimitata in keepass-rs → **RESPINTO con motivazione**: avviene solo dopo l'HMAC con la chiave
+  dell'utente (serve la master password); limite documentato in SECURITY.md e proposto upstream.
+
+## Round 2 — stessa sessione — REVISE — M3C-07 (medium): sospensione non gestita su Windows/macOS → ACCETTATO (rilevatore di salti).
+## Round 3 — stessa sessione — REVISE — M3C-07: soglia di 30 s troppo alta → ACCETTATO: Windows con notifica nativa
+   (`PowerRegisterSuspendResumeNotification`), macOS con thread a 1 s e soglia 4 s; rischio residuo macOS (< 4 s) documentato.
+## Round 4 — stessa sessione — **APPROVED**, 0 findings — plan sha256 79b207c3…b60
+- Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3cr1/claudex-fbtpjmrt/result.json`. Limiti dichiarati dal reviewer: rilevamento della sospensione su
+  macOS euristico; decompressione e XML ostile restano limiti documentati.
+
+## Implementazione — scostamenti dal piano (Claude)
+- **D-Bus in `crates/os`, non nel crate app**: `on_suspend` su Linux (logind `PrepareForSleep(true)`, bus di sistema) e
+  nuovo `on_screen_lock` (`ActiveChanged(true)` di qualsiasi interfaccia `*.ScreenSaver`, quindi anche GNOME, MATE e
+  Cinnamon oltre a `org.freedesktop.ScreenSaver`). Motivo: il crate app non si compila sulla macchina di sviluppo (niente
+  WebKitGTK), `crates/os` sì, e il codice è comunque safe. `zbus` 5 era già nel lockfile tramite tauri-plugin-opener.
+  `SuspendGuard` è diventato `Guard`.
+- **Un solo thread locker**: tutti i trigger inviano un `Reason` su un canale; né la callback di power di Windows né il
+  rilevatore di salti d'orologio aspettano il mutex del vault, che un salvataggio tiene durante la KDF (altrimenti un
+  salvataggio lento sembrerebbe una sospensione).
+- Il polling dello schermo (Windows, macOS) agisce sul **fronte** bloccato/sbloccato, non a ogni giro.
+- La logica pura (`Session`, `idle_expired`, `suspended`, `should_lock`) sta in `crates/app/src/autolock/policy.rs`;
+  verificata in locale con un crate di prova che la include, il resto con `cargo clippy --target x86_64-pc-windows-msvc`.
+
+## Ispezione 1 — Codex codex-cli 0.164.0, sessione nuova 01a1819b-d830-7d51-8e1b-167567550c28 (modello effettivo gpt-6.1-sol, sandbox read-only) — REVISE (2 high, 2 medium, 1 low)
+- Snapshot: base `1f07b58`, HEAD `d98233e`, diff sha256 a6386940…8199. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i1/claudex-szgsw7y9/result.json`
+- M3C-R01 (high) KDBX 3: il controllo leggeva il **primo** `TransformRounds`, keepass-rs usa l'**ultimo**; un header oltre 64 KiB
+  passava → **ACCETTATO** (verificato in keepass-rs 0.17 `format/kdbx3.rs`; in più un campo da 9 byte veniva accettato
+  e keepass-rs ne legge i primi 8). Nuovo `kdbx::header::kdbx3_transform_rounds`: ultima occorrenza, larghezze esatte,
+  id ≤ 10, fine header entro il tetto, altrimenti errore.
+- M3C-R02 (high) header KDBX 3 malformati arrivano alle letture non controllate di keepass-rs (panic) → **ACCETTATO**:
+  `check_version` rifiuta con `InvalidFormat` ogni header che non passa la validazione. Test unitari e a livello di
+  vault sulla fixture KeePassXC 3.1 con campi inseriti; fixture 3.1 aggiunta al corpus (`kdbx31-header.kdbx`).
+  Il lato KDBX 4 (`header::peek`) era già rigoroso e coerente con keepass-rs (ultima occorrenza vince).
+- M3C-R03 (medium) richiesta idle obsoleta dopo un salvataggio lento → **ACCETTATO**: `lock_session_if` ricontrolla la
+  scadenza sotto il mutex della sessione; `install` aggiorna l'attività sotto lo stesso mutex.
+- M3C-R04 (medium) CI non esegue i test di `keyrust-os` né `fuzz_seeds` → **ACCETTATO**: step `Test (core, fuzzing harness)`
+  e `Test (os)` nel job core sui tre OS.
+- M3C-R05 (low) campi KDF delle impostazioni del database senza `max` → **ACCETTATO**: `KDF_LIMITS` e `clampKdf` condivisi
+  da creazione e impostazioni.
+- Piano aggiornato nei passaggi interessati (criterio 1 KDBX 3.1 e frontend, criterio 4 inattività): nuovo sha256
+  addbb735…cbe.
+- Prove dopo le correzioni (Claude): `cargo test -p keyrust-core --features fuzzing` con KeePassXC (66 + 11 + 2 + 3 + 5
+  passati), clippy core con `fuzzing`, clippy `keyrust-app` per Windows, frontend 169 test + lint + check.
+
+## Ispezione 2 — Codex codex-cli 0.164.0, sessione nuova 01a181a9-18a4-7712-835e-2d079b89799a (gpt-6.1-sol, read-only) — REVISE (1 high, 1 medium)
+- Snapshot: HEAD `9b0f008`, diff sha256 4c989023…. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i2/claudex-j6nygped/result.json`
+- I finding R01–R05 non sono stati riaperti.
+- M3C-R06 (high) un evento `locked` in ritardo (il locker lo emette dopo aver rilasciato il mutex e svuotato gli appunti)
+  può azzerare nella UI una sessione aperta nel frattempo, lasciando il backend sbloccato dietro l'Unlock → **ACCETTATO**:
+  l'evento porta `session` (la generazione avviata dal lock), la risposta di `unlock`/`create` porta la generazione della
+  sessione installata, e il frontend ignora un evento con generazione non più recente della sessione aperta. Test Vitest
+  dell'evento tardivo.
+- M3C-R07 (medium) l'oracolo del round trip confrontava solo i cinque campi standard → **ACCETTATO**: confronto del modello
+  keepass-rs riaperto (accessor `Vault::database` solo con `fuzzing`): percorsi dei gruppi, tutti i campi con il flag di
+  protezione, allegati, cronologia. Verificato con una mutazione temporanea (allegati e cronologia rimossi → test fallito).
+- **Budget di ispezione esaurito (2/2)**: le correzioni R06/R07 non sono state ispezionate da Codex.
+- Prove (Claude): `fuzz_seeds` con il nuovo oracolo, clippy core con `fuzzing`, clippy `keyrust-app` per Windows, frontend
+  lint + check + 170 test (un test di app.test.ts supera il timeout di 5 s sotto carico; da solo passa 19/19).
+
+## Ispezione 3 (oltre il budget, su richiesta dell'utente) — Codex, sessione nuova 01a181b1-ef2c-7512-8070-6d81e2802247 (gpt-6.1-sol) — REVISE (1 high, 1 medium)
+- Snapshot: HEAD `ee83f8b`, diff sha256 26d5c095…. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i3/claudex-4em6zhui/result.json`
+- M3C-R08 (high) `enterVault` registrava la generazione solo dopo aver caricato albero e voci: un evento tardivo in quella
+  finestra veniva accettato → **ACCETTATO**: generazione registrata prima delle letture; test con caricamento differito,
+  verificato con una mutazione (senza la correzione il test fallisce).
+- M3C-R09 (medium) throttle dell'attività su `Date.now()`: un orologio spostato indietro silenzia i report → **ACCETTATO**:
+  `performance.now()` (monotono); test con l'orologio di sistema spostato indietro di un'ora.
+- Utente: correggere e fare una quarta ispezione. Prove: frontend lint + check + formato + 172 test.
+
+## Ispezione 4 (oltre il budget, su richiesta dell'utente) — Codex, sessione nuova 01a181b7-6cb3-7760-8729-a7e7274fab25 (gpt-6.1-sol) — REVISE (2 medium)
+- Snapshot: HEAD `8d16545`, diff sha256 6cb1ebf8…. Result:
+  `/tmp/claude-0/-opt-apps-password-manager/9c131df7-ecce-4811-bfd9-d7aa204db9e5/scratchpad/claudex/m3c-i4/claudex-rm_07207/result.json`
+- M3C-R10 (medium) un evento vecchio arrivato mentre la risposta di uno sblocco è in attesa annullava lo sblocco (esito
+  sicuro: tutto bloccato) → **ACCETTATO**: durante un'apertura l'evento viene messo da parte e confrontato con la generazione
+  della risposta. Test con risposta differita (generazione uguale → ignorato; maggiore → chiuso), verificato con una mutazione.
+- M3C-R11 (medium) un salvataggio poteva scrivere un file oltre 512 MiB che poi non si riapre → **ACCETTATO**: `Vault::write`
+  rifiuta con `TooExpensive` prima di `file::replace`; file intatto e modifiche conservate (test con limite ridotto).
+- Piano aggiornato (criteri 1 e 4), sha256 564f49b7…; SECURITY.md aggiornato.
+- Utente: correggere entrambi e fare il push **senza un'altra ispezione**: R10 e R11 non sono stati ispezionati da Codex.
+- Prove (Claude): core con KeePassXC e `fuzzing` (67 + 11 + 2 + 3 + 5), clippy core, clippy workspace per Windows,
+  frontend lint + check + formato + 173 test.

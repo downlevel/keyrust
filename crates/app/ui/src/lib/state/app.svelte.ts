@@ -16,6 +16,7 @@ import {
 	type GroupNode,
 	type Argon2idParams,
 	type DatabasePatch,
+	type LockReason,
 	type RecentFile,
 	type Settings,
 } from "$lib/api";
@@ -47,7 +48,38 @@ export type Confirm =
 	/** The vault has changes the last save could not write. */
 	| { kind: "unsaved"; action: () => void | Promise<void> };
 
-export type UnlockError = "wrongPassword" | "notFound" | "invalidFile" | "failed";
+export type UnlockError = "wrongPassword" | "notFound" | "invalidFile" | "tooExpensive" | "failed";
+
+/**
+ * Shown on the Unlock screen after a lock the user did not ask for:
+ * `interrupted` is a lock that arrived while a database was being opened.
+ */
+export interface LockNotice {
+	reason: LockReason | "interrupted";
+	/** The idle delay at the time of the lock. */
+	minutes: number;
+	/** The editor or the vault had changes that were not saved. */
+	lostChanges: boolean;
+}
+
+/** Activity reaches the backend at most this often. */
+export const ACTIVITY_THROTTLE_MS = 15_000;
+
+function unlockError(kind: VaultErrorKind): UnlockError {
+	switch (kind) {
+		case "wrongKey":
+			return "wrongPassword";
+		case "notFound":
+			return "notFound";
+		case "invalidFormat":
+		case "unsupportedVersion":
+			return "invalidFile";
+		case "tooExpensive":
+			return "tooExpensive";
+		default:
+			return "failed";
+	}
+}
 
 /** Rejections the user caused (a cancelled dialog) are not errors. */
 function cancelled(e: unknown): boolean {
@@ -75,6 +107,7 @@ export class AppState {
 	recents = $state<RecentFile[]>([]);
 	recentIndex = $state(0);
 	unlockError = $state<UnlockError | null>(null);
+	lockNotice = $state<LockNotice | null>(null);
 	createError = $state(false);
 	busy = $state<"unlock" | "create" | "save" | "benchmark" | null>(null);
 
@@ -135,6 +168,14 @@ export class AppState {
 	private settingsQueue: Promise<void> = Promise.resolve();
 	private settingsWrite = 0;
 	private toastTimer: ReturnType<typeof setInterval> | null = null;
+	/** Backend generation of the open session (from unlock / create). */
+	private backendSession: number | null = null;
+	/** A `locked` event received while a database was opening, kept until the
+	 * answer says whether it was about that session or an older one. */
+	private lockedWhileOpening: number | null = null;
+	/** When activity was last sent (ms, `performance.now()`: monotonic, so
+	 * setting the system clock back cannot silence the reports). */
+	private activitySent = -Infinity;
 
 	readonly isDemo: boolean;
 
@@ -231,6 +272,7 @@ export class AppState {
 		this.session++; // another database: any pending unlock is stale
 		this.recentIndex = index;
 		this.unlockError = null;
+		this.lockNotice = null;
 		this.busy = null;
 	}
 
@@ -250,6 +292,7 @@ export class AppState {
 			this.recentIndex = 0;
 		}
 		this.unlockError = null;
+		this.lockNotice = null;
 		this.busy = null;
 		this.screen = "unlock";
 	}
@@ -279,6 +322,8 @@ export class AppState {
 		const session = ++this.session;
 		this.busy = "unlock";
 		this.unlockError = null;
+		this.lockNotice = null;
+		this.lockedWhileOpening = null;
 		try {
 			const info = await this.openSession(session, () =>
 				this.api.vault.unlock(recent.path, password),
@@ -288,14 +333,8 @@ export class AppState {
 		} catch (e) {
 			if (session !== this.session) return;
 			const kind = e instanceof VaultError ? e.kind : "io";
-			this.unlockError =
-				kind === "wrongKey"
-					? "wrongPassword"
-					: kind === "notFound"
-						? "notFound"
-						: kind === "invalidFormat" || kind === "unsupportedVersion"
-							? "invalidFile"
-							: "failed";
+			if (kind === "locked") this.interrupted();
+			else this.unlockError = unlockError(kind);
 		} finally {
 			if (session === this.session) this.busy = null;
 		}
@@ -304,6 +343,7 @@ export class AppState {
 	startCreate() {
 		this.session++;
 		this.createError = false;
+		this.lockNotice = null;
 		this.busy = null;
 		this.screen = "create";
 	}
@@ -325,6 +365,7 @@ export class AppState {
 		const session = ++this.session;
 		this.busy = "create";
 		this.createError = false;
+		this.lockedWhileOpening = null;
 		try {
 			const info = await this.openSession(session, () => this.api.vault.create(options));
 			if (!info || session !== this.session) return;
@@ -334,14 +375,29 @@ export class AppState {
 			];
 			this.recentIndex = 0;
 			await this.enterVault(info, session);
-		} catch {
-			if (session === this.session) this.createError = true;
+		} catch (e) {
+			if (session !== this.session) return;
+			// Locked while opening the new file: it exists, so offer to unlock it.
+			if (e instanceof VaultError && e.kind === "locked") await this.interruptedCreate();
+			else this.createError = true;
 		} finally {
 			if (session === this.session) this.busy = null;
 		}
 	}
 
 	private async enterVault(info: DatabaseInfo, session: number) {
+		// A lock that started after this session was installed has closed it.
+		const lockedAt = this.lockedWhileOpening;
+		this.lockedWhileOpening = null;
+		if (lockedAt !== null && (info.session === undefined || lockedAt > info.session)) {
+			this.clearSession();
+			this.interrupted();
+			this.screen = this.recents.length ? "unlock" : "welcome";
+			return;
+		}
+		// Known before the reads below: a late `locked` event about an older
+		// backend session must not clear this one while they are in flight.
+		this.backendSession = info.session ?? null;
 		const [tree, entries] = await Promise.all([
 			this.api.vault.tree(),
 			this.api.vault.listEntries(),
@@ -364,6 +420,63 @@ export class AppState {
 
 	/** Immediate: discards the editor without asking. */
 	lock() {
+		this.clearSession();
+		void this.serialize(() => this.api.vault.lock());
+		this.screen = this.recents.length ? "unlock" : "welcome";
+	}
+
+	/**
+	 * The backend locked the vault on its own (`locked` event): same clean-up
+	 * as `lock()`, without calling the backend, and nothing is asked even with
+	 * unsaved changes. A database still being opened is abandoned too.
+	 */
+	autoLocked(reason: LockReason, session?: number) {
+		// A late event about an older backend session: the open one is newer.
+		if (session !== undefined && this.backendSession !== null && session <= this.backendSession)
+			return;
+		const opening = this.busy === "unlock" || this.busy === "create";
+		if (!this.db && !opening) return;
+		// Opening: which session the lock was about is known from the answer.
+		if (!this.db && session !== undefined) {
+			this.lockedWhileOpening = Math.max(session, this.lockedWhileOpening ?? session);
+			return;
+		}
+		const notice: LockNotice = {
+			reason: this.db ? reason : "interrupted",
+			minutes: this.settings.idle_lock_mins,
+			lostChanges: this.vaultDirty || this.editorDirty,
+		};
+		const creating = this.busy === "create";
+		this.clearSession();
+		this.lockNotice = notice;
+		if (creating) void this.loadRecents();
+		else this.screen = this.recents.length ? "unlock" : "welcome";
+	}
+
+	/** An unlock answered `locked`: a lock arrived while it was deriving the key. */
+	private interrupted() {
+		this.lockNotice = { reason: "interrupted", minutes: 0, lostChanges: false };
+	}
+
+	/** The backend remembered the new file: show it on the Unlock screen. */
+	private async interruptedCreate() {
+		this.interrupted();
+		await this.loadRecents();
+	}
+
+	/**
+	 * Keyboard, pointer or wheel input. Sent to the backend at most every
+	 * `ACTIVITY_THROTTLE_MS`, only in Tauri and only with a vault open.
+	 */
+	reportActivity(now = performance.now()) {
+		if (this.isDemo || this.screen !== "vault") return;
+		if (now - this.activitySent < ACTIVITY_THROTTLE_MS) return;
+		this.activitySent = now;
+		void this.api.vault.activity().catch(() => {});
+	}
+
+	/** Forgets everything of the open session in the UI. */
+	private clearSession() {
 		this.session++;
 		this.selection++;
 		this.db = null;
@@ -385,8 +498,10 @@ export class AppState {
 		this.generated = "";
 		this.vaultDirty = false;
 		this.saveState = "saved";
-		void this.serialize(() => this.api.vault.lock());
-		this.screen = this.recents.length ? "unlock" : "welcome";
+		this.lockNotice = null;
+		this.activitySent = -Infinity;
+		this.backendSession = null;
+		this.lockedWhileOpening = null;
 	}
 
 	// ---------------------------------------------------------------- leaving the editor

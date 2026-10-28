@@ -744,3 +744,131 @@ fn saving_through_a_symbolic_link_updates_the_target() {
     );
     assert_eq!(reopen(&f).info().name, "Through the link");
 }
+
+// ------------------------------------------------------------------ milestone 3c: resource limits
+
+#[test]
+fn files_beyond_the_limits_are_refused_before_the_kdf() {
+    use crate::kdbx::limits::Limits;
+    let (f, _vault) = new_vault();
+    let bytes = std::fs::read(&f.path).expect("read");
+    for strict in [
+        Limits {
+            max_argon2_memory_bytes: 1024 * 1024,
+            ..Limits::DEFAULT
+        },
+        Limits {
+            max_argon2_iterations: 0,
+            ..Limits::DEFAULT
+        },
+        Limits {
+            max_argon2_parallelism: 0,
+            ..Limits::DEFAULT
+        },
+        Limits {
+            max_file_bytes: 100,
+            ..Limits::DEFAULT
+        },
+    ] {
+        let start = Instant::now();
+        let result = Vault::open_bytes_with_limits(&bytes, secret(PASSWORD), &strict);
+        assert!(
+            matches!(result, Err(VaultError::TooExpensive)),
+            "{strict:?}"
+        );
+        assert!(start.elapsed().as_millis() < 50, "refused before the KDF");
+    }
+    Vault::open_bytes_with_limits(&bytes, secret(PASSWORD), &Limits::DEFAULT).expect("default");
+}
+
+#[test]
+fn kdbx3_headers_keepass_rs_would_misread_are_refused() {
+    use crate::kdbx::limits::Limits;
+    let original = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/keepassxc-kdbx31.kdbx"),
+    )
+    .expect("fixture");
+    // A field inserted right after the version, before KeePassXC's own ones.
+    let with = |field: &[u8]| {
+        let mut bytes = original[..12].to_vec();
+        bytes.extend_from_slice(field);
+        bytes.extend_from_slice(&original[12..]);
+        bytes
+    };
+    // Empty or short fixed-width fields: keepass-rs would panic reading them.
+    for field in [&[6u8, 0, 0][..], &[3, 2, 0, 1, 0], &[10, 0, 0]] {
+        let result =
+            Vault::open_bytes_with_limits(&with(field), secret(FIXTURE_PASSWORD), &Limits::DEFAULT);
+        assert!(
+            matches!(result, Err(VaultError::InvalidFormat)),
+            "{field:?}"
+        );
+    }
+    // A cheap first TransformRounds does not hide an expensive later one:
+    // keepass-rs uses the last, and so does the check.
+    let mut cheap = vec![6u8, 8, 0];
+    cheap.extend_from_slice(&1u64.to_le_bytes());
+    let strict = Limits {
+        max_aes_rounds: 1,
+        ..Limits::DEFAULT
+    };
+    let start = Instant::now();
+    let result = Vault::open_bytes_with_limits(&with(&cheap), secret(FIXTURE_PASSWORD), &strict);
+    assert!(matches!(result, Err(VaultError::TooExpensive)));
+    assert!(start.elapsed().as_millis() < 50, "refused before the KDF");
+}
+
+#[test]
+fn a_save_beyond_the_open_size_limit_is_refused_and_keeps_the_file() {
+    use crate::kdbx::limits::Limits;
+    let (f, mut vault) = new_vault();
+    let before = std::fs::read(&f.path).expect("read");
+    let big = EntryDraft {
+        notes: "x".repeat(4096),
+        ..draft(&vault, "Big", "pw")
+    };
+    vault.save_entry(&big).expect("entry");
+    vault.max_file_bytes = before.len() as u64 + 100;
+    assert!(matches!(vault.save(), Err(VaultError::TooExpensive)));
+    assert!(vault.is_dirty(), "unsaved changes are kept");
+    assert_eq!(
+        std::fs::read(&f.path).expect("read"),
+        before,
+        "file untouched"
+    );
+    vault.max_file_bytes = Limits::DEFAULT.max_file_bytes;
+    vault.save().expect("save within the limit");
+}
+
+#[test]
+fn reading_is_bounded_even_if_the_file_grows() {
+    let (f, _vault) = new_vault();
+    let path = f.path.clone();
+    let len = std::fs::metadata(&path).expect("meta").len();
+    assert!(file::read_limited(&path, len).expect("read").is_some());
+    assert!(file::read_limited(&path, len - 1).expect("read").is_none());
+
+    let grown = path.clone();
+    hook::set(move |phase| {
+        if phase == Phase::OpenBeforeRead {
+            let mut bigger = std::fs::read(&grown).expect("read");
+            bigger.extend(std::iter::repeat_n(0u8, 4096));
+            std::fs::write(&grown, bigger).expect("grow");
+        }
+    });
+    let result = file::read_limited(&path, len + 100);
+    hook::clear();
+    assert!(
+        result.expect("read").is_none(),
+        "growth past the limit is refused"
+    );
+}
+
+#[test]
+fn change_checks_do_not_read_a_much_larger_file() {
+    let (f, vault) = new_vault();
+    let mut bigger = std::fs::read(&f.path).expect("read");
+    bigger.extend(std::iter::repeat_n(7u8, 1024 * 1024));
+    std::fs::write(&f.path, bigger).expect("write");
+    assert!(!vault.file_unchanged().expect("check"));
+}

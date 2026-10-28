@@ -267,6 +267,8 @@ export class DemoVault implements VaultApi {
 		this.groups = [];
 		this.entries = [];
 	}
+	/** The demo has no backend timer: activity is never reported to it. */
+	async activity(): Promise<void> {}
 
 	async tree(): Promise<GroupNode> {
 		await this.pause();

@@ -641,3 +641,213 @@ describe("3b second inspection regressions (guard waiting)", () => {
 		expect(app.screen).toBe("vault");
 	});
 });
+
+describe("automatic lock", () => {
+	/** The demo vault posing as the real one, for what the demo never does. */
+	function asReal(vault: DemoVault) {
+		return Object.defineProperty(vault, "isDemo", { value: false });
+	}
+
+	it("clears the session like Lock, without calling the backend or asking", async () => {
+		const { app, vault } = await unlocked();
+		const lock = vi.spyOn(vault, "lock");
+		await app.selectEntry("github");
+		await app.toggleReveal();
+		await app.editEntry("github");
+		app.updateDraft({ username: "changed" });
+		app.autoLocked("idle");
+		expect(lock).not.toHaveBeenCalled();
+		expect(app.confirm).toBeNull();
+		expect(app.screen).toBe("unlock");
+		expect(app.selectedId).toBeNull();
+		expect(app.revealed).toBeNull();
+		expect(app.editor).toBeNull();
+		expect(app.entries).toEqual([]);
+		expect(app.lockNotice).toEqual({ reason: "idle", minutes: 5, lostChanges: true });
+	});
+
+	it("records the reason and no lost changes when everything was saved", async () => {
+		const { app } = await unlocked();
+		app.autoLocked("screenLock");
+		expect(app.lockNotice).toEqual({ reason: "screenLock", minutes: 5, lostChanges: false });
+	});
+
+	it("ignores a late event about an older backend session", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const real = vault.unlock.bind(vault);
+		// The backend installed this session at generation 5.
+		vault.unlock = async (path, password) => ({ ...(await real(path, password)), session: 5 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		await app.unlock("secret");
+		// A lock that started generation 5 locked the previous session.
+		app.autoLocked("idle", 5);
+		expect(app.screen).toBe("vault");
+		expect(app.lockNotice).toBeNull();
+		// One that started generation 6 locked this one.
+		app.autoLocked("idle", 6);
+		expect(app.screen).toBe("unlock");
+		expect(app.lockNotice?.reason).toBe("idle");
+	});
+
+	it("ignores a late event while the new session is still loading", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const real = vault.unlock.bind(vault);
+		vault.unlock = async (path, password) => ({ ...(await real(path, password)), session: 5 });
+		const lock = vi.spyOn(vault, "lock");
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		const tree = deferred<Awaited<ReturnType<DemoVault["tree"]>>>();
+		const realTree = vault.tree.bind(vault);
+		vault.tree = () => tree.promise;
+		const pending = app.unlock("secret");
+		await vi.waitFor(() => expect(app.busy).toBe("unlock"));
+		// Let the unlock answer; the tree is still loading.
+		await new Promise((r) => setTimeout(r, 0));
+		app.autoLocked("idle", 5);
+		tree.resolve(await realTree());
+		await pending;
+		expect(app.screen).toBe("vault");
+		expect(app.lockNotice).toBeNull();
+		expect(lock).not.toHaveBeenCalled();
+	});
+
+	it("reconciles an event received while the unlock answer is pending", async () => {
+		const setup = async () => {
+			const vault = new DemoVault({ delayMs: 0 });
+			const real = vault.unlock.bind(vault);
+			const answer = deferred<void>();
+			// Installed at generation 5, answered only when the test says so.
+			vault.unlock = async (path, password) => {
+				const info = await real(path, password);
+				await answer.promise;
+				return { ...info, session: 5 };
+			};
+			const app = new AppState({ vault, app: new MemoryAppApi() });
+			await app.init();
+			const pending = app.unlock("secret");
+			await vi.waitFor(() => expect(app.busy).toBe("unlock"));
+			return { app, answer, pending };
+		};
+		// About an older session (it started generation 5): the unlock goes on.
+		const older = await setup();
+		older.app.autoLocked("screenLock", 5);
+		older.answer.resolve();
+		await older.pending;
+		expect(older.app.screen).toBe("vault");
+		expect(older.app.lockNotice).toBeNull();
+		// Started after the install (generation 6): this session is closed.
+		const newer = await setup();
+		newer.app.autoLocked("screenLock", 6);
+		newer.answer.resolve();
+		await newer.pending;
+		expect(newer.app.screen).toBe("unlock");
+		expect(newer.app.db).toBeNull();
+		expect(newer.app.lockNotice?.reason).toBe("interrupted");
+	});
+
+	it("is ignored when nothing is open or being opened", async () => {
+		const app = new AppState({ vault: new DemoVault({ delayMs: 0 }), app: new MemoryAppApi() });
+		await app.init();
+		app.autoLocked("suspend");
+		expect(app.lockNotice).toBeNull();
+		expect(app.screen).toBe("unlock");
+	});
+
+	it("abandons an unlock in progress", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		const late = deferred<Awaited<ReturnType<DemoVault["unlock"]>>>();
+		const real = vault.unlock.bind(vault);
+		vault.unlock = () => late.promise;
+		const pending = app.unlock("secret");
+		app.autoLocked("screenLock");
+		expect(app.busy).toBeNull();
+		expect(app.lockNotice?.reason).toBe("interrupted");
+		late.resolve(await real(app.recents[0].path, "secret"));
+		await pending;
+		expect(app.screen).toBe("unlock");
+		expect(app.db).toBeNull();
+	});
+
+	it("explains an unlock the backend discarded because of a lock", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		vault.unlock = () => Promise.reject(new VaultError("locked"));
+		await app.unlock("secret");
+		expect(app.unlockError).toBeNull();
+		expect(app.lockNotice?.reason).toBe("interrupted");
+		app.selectRecent(1);
+		expect(app.lockNotice).toBeNull();
+	});
+
+	it("a database beyond the open limits gets its own message", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		vault.unlock = () => Promise.reject(new VaultError("tooExpensive"));
+		await app.unlock("secret");
+		expect(app.unlockError).toBe("tooExpensive");
+	});
+
+	it("reports activity at most every 15 seconds, only with a vault open", async () => {
+		const vault = asReal(new DemoVault({ delayMs: 0 }));
+		const activity = vi.spyOn(vault, "activity");
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		app.reportActivity(1_000);
+		expect(activity).not.toHaveBeenCalled();
+		await app.unlock("secret");
+		app.reportActivity(1_000);
+		app.reportActivity(15_999);
+		expect(activity).toHaveBeenCalledTimes(1);
+		app.reportActivity(16_000);
+		expect(activity).toHaveBeenCalledTimes(2);
+		app.lock();
+		app.reportActivity(40_000);
+		expect(activity).toHaveBeenCalledTimes(2);
+	});
+
+	it("uses a monotonic clock: setting the system clock back does not silence activity", async () => {
+		const vault = asReal(new DemoVault({ delayMs: 0 }));
+		const activity = vi.spyOn(vault, "activity");
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		await app.unlock("secret");
+		const now = vi.spyOn(performance, "now").mockReturnValue(100_000);
+		const wall = vi.spyOn(Date, "now").mockReturnValue(10_000_000);
+		app.reportActivity();
+		wall.mockReturnValue(10_000_000 - 3_600_000); // an hour back
+		now.mockReturnValue(116_000);
+		app.reportActivity();
+		expect(activity).toHaveBeenCalledTimes(2);
+		now.mockRestore();
+		wall.mockRestore();
+	});
+
+	it("never reports activity in the demo", async () => {
+		const { app, vault } = await unlocked();
+		const activity = vi.spyOn(vault, "activity");
+		app.reportActivity(1_000);
+		app.reportActivity(100_000);
+		expect(activity).not.toHaveBeenCalled();
+	});
+});
+
+describe("KDF limits in the forms", () => {
+	it("brings typed-in parameters within the limits Keyrust opens", async () => {
+		const { clampKdf } = await import("$lib/api/app");
+		expect(clampKdf({ memoryMib: 5000, iterations: 0, parallelism: 300 })).toEqual({
+			memoryMib: 2048,
+			iterations: 1,
+			parallelism: 256,
+		});
+		expect(clampKdf({ memoryMib: 64, iterations: 3, parallelism: 2 })).toEqual({
+			memoryMib: 64,
+			iterations: 3,
+			parallelism: 2,
+		});
+	});
+});

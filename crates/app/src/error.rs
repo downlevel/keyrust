@@ -31,6 +31,7 @@ impl From<VaultError> for IpcError {
             VaultError::Io(std::io::ErrorKind::NotFound) => "notFound",
             VaultError::Io(_) => "io",
             VaultError::NotDurable(_) => "notDurable",
+            VaultError::TooExpensive => "tooExpensive",
             // Future variants of the core stay opaque to the webview.
             #[allow(unreachable_patterns)]
             _ => "io",

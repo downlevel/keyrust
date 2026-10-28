@@ -22,10 +22,30 @@
 				? m.unlock_error_not_found()
 				: app.unlockError === "invalidFile"
 					? m.unlock_error_invalid_file()
-					: app.unlockError === "failed"
-						? m.unlock_error_failed()
-						: "",
+					: app.unlockError === "tooExpensive"
+						? m.unlock_error_too_expensive()
+						: app.unlockError === "failed"
+							? m.unlock_error_failed()
+							: "",
 	);
+
+	const noticeText = $derived.by(() => {
+		const notice = app.lockNotice;
+		if (!notice) return "";
+		const why =
+			notice.reason === "idle"
+				? notice.minutes === 1
+					? m.lock_notice_idle_one()
+					: m.lock_notice_idle_many({ minutes: String(notice.minutes) })
+				: notice.reason === "screenLock"
+					? m.lock_notice_screen_lock()
+					: notice.reason === "suspend"
+						? m.lock_notice_suspend()
+						: notice.reason === "minimize"
+							? m.lock_notice_minimize()
+							: m.lock_notice_interrupted();
+		return notice.lostChanges ? `${why} ${m.lock_notice_lost_changes()}` : why;
+	});
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
@@ -69,6 +89,15 @@
 				class="flex flex-col gap-5 rounded-xl border border-border bg-card p-8 shadow-xs"
 			>
 				<Wordmark subtitle={m.unlock_subtitle()} />
+				{#if noticeText}
+					<p
+						role="status"
+						data-testid="lock-notice"
+						class="rounded-lg border border-border bg-muted px-3 py-2.5 text-[13px] text-muted-foreground"
+					>
+						{noticeText}
+					</p>
+				{/if}
 				<div
 					class="flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5"
 				>

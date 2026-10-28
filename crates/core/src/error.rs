@@ -13,6 +13,9 @@ pub enum VaultError {
     UnsupportedVersion { major: u16, minor: u16 },
     #[error("the file was changed by another application")]
     ExternalChange,
+    /// The file asks for more memory, time or size than `Limits` allow.
+    #[error("the database asks for more resources than allowed")]
+    TooExpensive,
     #[error("the file already exists")]
     AlreadyExists,
     #[error("this vault has no file to save to")]

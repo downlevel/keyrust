@@ -17,7 +17,8 @@ Dropbox. No account, no cloud, no telemetry.
 - Create, open and save KDBX4 databases protected by a master password (Argon2id).
 - Entries (title, username, password, URL, notes) organised in groups; recycle bin.
 - Instant search, configurable password generator.
-- Copy to clipboard with automatic clearing; auto-lock on inactivity and screen lock.
+- Copy to clipboard with automatic clearing; auto-lock on inactivity, screen lock, sleep and
+  (optionally) minimize.
 - Two-way compatibility with KeePassXC, verified by automated tests.
 - Full keyboard navigation.
 
@@ -35,6 +36,7 @@ KeePassXC itself, fuzzing and CI on three operating systems.
 ```
 crates/core   vault, crypto and KDBX4 format (no UI dependencies) — keepass-rs, RustCrypto
 crates/app    Tauri 2 desktop shell + SvelteKit / Svelte 5 UI (crates/app/ui)
+crates/os     screen lock and suspend detection; the only crate with (FFI) unsafe code
 ```
 
 Secrets stay on the Rust side: the webview only receives what it displays, and copying a

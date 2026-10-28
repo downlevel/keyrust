@@ -6,6 +6,7 @@
 	import ChevronDown from "@lucide/svelte/icons/chevron-down";
 	import LoaderCircle from "@lucide/svelte/icons/loader-circle";
 	import type { Cipher, StrengthEstimate } from "$lib/api";
+	import { clampKdf, KDF_LIMITS } from "$lib/api/app";
 	import { estimateStrength } from "$lib/api/strength";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import DemoBadge from "$lib/components/app/DemoBadge.svelte";
@@ -73,7 +74,7 @@
 			name,
 			password: secret,
 			cipher,
-			kdf: { memoryMib, iterations, parallelism },
+			kdf: clampKdf({ memoryMib, iterations, parallelism }),
 		});
 	}
 
@@ -203,7 +204,8 @@
 							<label class="flex flex-col gap-1 text-[13px]"
 								>{m.kdf_memory()}<input
 									type="number"
-									min="8"
+									min={KDF_LIMITS.memoryMib.min}
+									max={KDF_LIMITS.memoryMib.max}
 									class="{small} font-mono"
 									bind:value={memoryMib}
 								/></label
@@ -211,7 +213,8 @@
 							<label class="flex flex-col gap-1 text-[13px]"
 								>{m.kdf_iterations()}<input
 									type="number"
-									min="1"
+									min={KDF_LIMITS.iterations.min}
+									max={KDF_LIMITS.iterations.max}
 									class="{small} font-mono"
 									bind:value={iterations}
 								/></label
@@ -219,7 +222,8 @@
 							<label class="flex flex-col gap-1 text-[13px]"
 								>{m.kdf_parallelism()}<input
 									type="number"
-									min="1"
+									min={KDF_LIMITS.parallelism.min}
+									max={KDF_LIMITS.parallelism.max}
 									class="{small} font-mono"
 									bind:value={parallelism}
 								/></label

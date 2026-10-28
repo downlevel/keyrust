@@ -49,9 +49,11 @@
 ### app (Tauri + Svelte)
 - [x] Comandi IPC: unlock, create, save, lock, list_groups, list_entries (solo `EntrySummary`), get_entry, reveal_field, update_entry, delete, search, generate
 - [x] `copy_field` lato Rust con `arboard`: auto-clear dopo N s solo se il contenuto è invariato, hint di esclusione cronologia, clear al lock/uscita
-- [ ] Auto-lock per inattività (timer resettato dall'input)
-- [ ] Auto-lock al blocco schermo: Linux (D-Bus logind/ScreenSaver), Windows (WTS session notification), macOS (`com.apple.screenIsLocked`)
-- [ ] Lock opzionale alla minimizzazione
+- [x] Auto-lock per inattività (timer nel backend resettato dall'input), gestito dal processo Rust (3c)
+- [x] Auto-lock al blocco schermo: Linux (D-Bus `*.ScreenSaver`), Windows e macOS (polling di `crates/os`) (3c)
+- [x] Auto-lock alla sospensione: Windows (notifica di power), Linux (logind), macOS (salti d'orologio) (3c)
+- [x] Lock opzionale alla minimizzazione (3c)
+- [x] Limiti di apertura prima della KDF (`TooExpensive`), letture limitate (3c)
 - [x] Schermate: Welcome/Unlock con file recenti, wizard Create database, Vault, Entry editor, Generator popover, Settings
 - [x] Indicatore "unsaved changes" e salvataggio (Ctrl+S)
 
@@ -59,7 +61,7 @@
 - [x] Test KeePassXC → Keyrust: apertura di tutte le fixture con verifica del contenuto atteso
 - [x] Test Keyrust → KeePassXC: DB generati verificati con `keepassxc-cli ls/show/export`
 - [x] Test round-trip lossless: fixture → salva → export XML con `keepassxc-cli`, nessuna differenza
-- [ ] Target fuzz `open_from_bytes` con corpus dalle fixture; run lunga manuale e correzione dei crash
+- [x] Target fuzz `vault_open_bytes` (semi generati con keepass-rs) e `vault_roundtrip`; corsa lunga manuale in CI (3c)
 - [ ] Verifica manuale con KeePassDX (Android) e Strongbox (iOS) su un DB sincronizzato
 
 ## Milestone 4 — Polish & deploy

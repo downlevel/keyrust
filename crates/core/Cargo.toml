@@ -24,6 +24,11 @@ tracing = "0.1"
 uuid = { version = "1", features = ["serde"] }
 zeroize = "1"
 zxcvbn = "3"
+arbitrary = { version = "1", features = ["derive"], optional = true }
+
+# Enables `keyrust_core::fuzzing`, the harness used by the fuzz targets.
+[features]
+fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
 roxmltree = "0.20"

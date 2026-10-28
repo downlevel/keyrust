@@ -1,0 +1,41 @@
+[package]
+name = "keyrust-os"
+description = "The few operating-system calls Keyrust needs (screen lock, suspend): the only crate where unsafe is allowed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Power",
+    "Win32_System_StationsAndDesktops",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# Already in the dependency tree through tauri-plugin-opener.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+serde = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+
+# Not the workspace lints: those forbid unsafe code. Here it is denied by
+# default and allowed only on the few FFI functions, each with a SAFETY note.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+print_stdout = "warn"
+undocumented_unsafe_blocks = "deny"

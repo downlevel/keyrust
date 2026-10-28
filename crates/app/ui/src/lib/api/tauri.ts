@@ -48,6 +48,9 @@ export class TauriVault implements VaultApi {
 	lock() {
 		return call<void>("lock_vault");
 	}
+	activity() {
+		return call<void>("activity");
+	}
 	databaseInfo() {
 		return call<DatabaseInfo>("database_info");
 	}

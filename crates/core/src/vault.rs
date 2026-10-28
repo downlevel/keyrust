@@ -21,6 +21,7 @@ use secrecy::{ExposeSecret, SecretString};
 use crate::error::{Result, VaultError};
 use crate::file::{self, Phase, ReplaceError, Stamp};
 use crate::kdbx::header::{self, HeaderError};
+use crate::kdbx::limits::{self, Limits};
 use crate::model::{
     Argon2Variant, Argon2idParams, Cipher, CreateOptions, DatabaseInfo, EntryDetail, EntryDraft,
     EntryId, EntrySummary, Field, GroupId, GroupNode, KdfInfo,
@@ -42,6 +43,9 @@ pub struct Vault {
     /// Content of the file this model was read from or last written to.
     stamp: Option<Stamp>,
     dirty: bool,
+    /// Largest file a save may write: what opening accepts, so a save never
+    /// produces a database Keyrust then refuses.
+    max_file_bytes: u64,
     /// Lower-cased searchable text per entry, rebuilt after any change.
     index: OnceCell<Vec<(EntryId, String)>>,
 }
@@ -73,13 +77,24 @@ fn iso(time: Option<NaiveDateTime>) -> Option<String> {
 fn check_version(bytes: &[u8]) -> Result<()> {
     match header::peek(bytes) {
         Ok(_) => Ok(()),
-        // KDBX 3.1 is read by keepass-rs (and written back as KDBX 4).
-        Err(HeaderError::UnsupportedVersion { major: 3, .. }) => Ok(()),
+        // KDBX 3.1 is read by keepass-rs (and written back as KDBX 4), once
+        // its header is known to be one keepass-rs reads without panicking.
+        Err(HeaderError::UnsupportedVersion { major: 3, .. }) => {
+            header::kdbx3_transform_rounds(bytes).map_err(|_| VaultError::InvalidFormat)?;
+            Ok(())
+        }
         Err(HeaderError::UnsupportedVersion { major, minor }) => {
             Err(VaultError::UnsupportedVersion { major, minor })
         }
         Err(_) => Err(VaultError::InvalidFormat),
     }
+}
+
+fn check_limits(bytes: &[u8], limits: &Limits) -> Result<()> {
+    limits::check(bytes, limits).map_err(|exceeded| {
+        tracing::warn!(?exceeded, "database refused: exceeds resource limits");
+        VaultError::TooExpensive
+    })
 }
 
 fn map_open_error(e: DatabaseOpenError) -> VaultError {
@@ -166,6 +181,12 @@ fn move_untracked(
 }
 
 impl Vault {
+    /// The keepass-rs model, for the round-trip oracle of the fuzz harness.
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn database(&self) -> &Database {
+        &self.db
+    }
+
     // ------------------------------------------------------------ open / create
 
     /// Opens a database file. The file is read once; the model and the stamp
@@ -174,7 +195,8 @@ impl Vault {
         // Saving replaces a file by rename: through a symbolic link that would
         // replace the link, so the vault keeps the link's target instead.
         let path = &std::fs::canonicalize(path)?;
-        let bytes = std::fs::read(path)?;
+        let bytes = file::read_limited(path, Limits::DEFAULT.max_file_bytes)?
+            .ok_or(VaultError::TooExpensive)?;
         file::fire(Phase::OpenAfterRead);
         let mut vault = Self::open_bytes(&bytes, password)?;
         vault.path = Some(path.to_path_buf());
@@ -186,6 +208,17 @@ impl Vault {
 
     /// Opens a database from memory (no file to save to).
     pub fn open_bytes(bytes: &[u8], password: SecretString) -> Result<Self> {
+        Self::open_bytes_with_limits(bytes, password, &Limits::DEFAULT)
+    }
+
+    /// Like `open_bytes`, with explicit resource limits (fuzzing, tests).
+    /// The limits are checked on the header before any key derivation.
+    pub fn open_bytes_with_limits(
+        bytes: &[u8],
+        password: SecretString,
+        limits: &Limits,
+    ) -> Result<Self> {
+        check_limits(bytes, limits)?;
         check_version(bytes)?;
         let db = Database::parse(bytes, key(&password)).map_err(map_open_error)?;
         Ok(Self {
@@ -195,6 +228,7 @@ impl Vault {
             pending: None,
             stamp: None,
             dirty: false,
+            max_file_bytes: limits.max_file_bytes,
             index: OnceCell::new(),
         })
     }
@@ -232,6 +266,7 @@ impl Vault {
             pending: None,
             stamp: None,
             dirty: true,
+            max_file_bytes: Limits::DEFAULT.max_file_bytes,
             index: OnceCell::new(),
         };
         vault.write(None, false)?;
@@ -271,6 +306,14 @@ impl Vault {
             tracing::warn!(error = %e, "cannot serialise vault");
             VaultError::Io(std::io::ErrorKind::Other)
         })?;
+        // The file on disk and the unsaved state stay as they are.
+        if bytes.len() as u64 > self.max_file_bytes {
+            tracing::warn!(
+                bytes = bytes.len(),
+                "save refused: beyond the open size limit"
+            );
+            return Err(VaultError::TooExpensive);
+        }
         let mut durability = Ok(());
         match file::replace(&path, &bytes, expected.as_ref(), overwrite) {
             Ok(()) => {}
@@ -302,7 +345,9 @@ impl Vault {
     /// changes. On failure the vault is left exactly as it was.
     pub fn reload(&mut self) -> Result<()> {
         let path = self.path.clone().ok_or(VaultError::NoFile)?;
-        let bytes = std::fs::read(&path)?;
+        let bytes = file::read_limited(&path, Limits::DEFAULT.max_file_bytes)?
+            .ok_or(VaultError::TooExpensive)?;
+        check_limits(&bytes, &Limits::DEFAULT)?;
         check_version(&bytes)?;
         let db = Database::parse(&bytes, key(&self.committed)).map_err(map_open_error)?;
         self.db = db;

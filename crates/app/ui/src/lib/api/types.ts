@@ -90,6 +90,8 @@ export interface DatabaseInfo {
 	version: [number, number];
 	/** Changes in memory that are not in the file yet. */
 	dirty: boolean;
+	/** Only from unlock / create: the backend generation of the new session. */
+	session?: number;
 }
 
 export interface RecentFile {
@@ -134,3 +136,6 @@ export interface Settings {
 export interface AppInfo {
 	version: string;
 }
+
+/** Why the backend locked the vault on its own (`locked` event). */
+export type LockReason = "idle" | "screenLock" | "suspend" | "minimize";
