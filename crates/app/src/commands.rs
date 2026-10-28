@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use keyrust_core::generator::{self, GeneratorOptions};
@@ -29,14 +29,21 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::autolock::{AutoLock, Session};
 use crate::clipboard::Clipboard;
 use crate::error::{IpcError, IpcResult};
 
 // ---------------------------------------------------------------- state
 
-/// The open database, if any. `None` is "locked".
+/// The open database, if any, and its lock generation (see [`Session`]).
 #[derive(Default)]
-pub struct VaultState(pub Mutex<Option<Vault>>);
+pub struct VaultState(pub Mutex<Session<Vault>>);
+
+impl VaultState {
+    pub fn is_open(&self) -> bool {
+        self.0.lock().is_ok_and(|s| s.is_open())
+    }
+}
 
 /// Settings held in memory and the file they persist to.
 pub struct SettingsState {
@@ -54,7 +61,7 @@ fn lock<T>(m: &Mutex<T>) -> IpcResult<MutexGuard<'_, T>> {
 
 fn with_vault<T>(state: &VaultState, f: impl FnOnce(&mut Vault) -> IpcResult<T>) -> IpcResult<T> {
     let mut guard = lock(&state.0)?;
-    let vault = guard.as_mut().ok_or(IpcError::LOCKED)?;
+    let vault = guard.vault_mut().ok_or(IpcError::LOCKED)?;
     f(vault)
 }
 
@@ -252,11 +259,10 @@ pub async fn unlock(
 ) -> IpcResult<DatabaseView> {
     let path = allowed_path(&app, &path)?;
     let opened = path.clone();
+    let generation = lock(&app.state::<VaultState>().0)?.generation();
     let vault = blocking(move || Vault::open(&opened, password).map_err(IpcError::from)).await?;
-    let result = view(&vault);
-    *lock(&app.state::<VaultState>().0)? = Some(vault);
     remember_recent(&app.state::<SettingsState>(), &path);
-    Ok(result)
+    install(&app, vault, generation)
 }
 
 #[derive(Deserialize)]
@@ -273,6 +279,7 @@ pub struct CreateRequest {
 pub async fn create(app: AppHandle, request: CreateRequest) -> IpcResult<DatabaseView> {
     let path = allowed_path(&app, &request.path)?;
     let target = path.clone();
+    let generation = lock(&app.state::<VaultState>().0)?.generation();
     let vault = blocking(move || {
         Vault::create(
             &target,
@@ -286,21 +293,48 @@ pub async fn create(app: AppHandle, request: CreateRequest) -> IpcResult<Databas
         .map_err(IpcError::from)
     })
     .await?;
-    let result = view(&vault);
-    *lock(&app.state::<VaultState>().0)? = Some(vault);
     remember_recent(&app.state::<SettingsState>(), &path);
+    install(&app, vault, generation)
+}
+
+/// Makes `vault` the open database unless a lock happened since `generation`
+/// was read: then it is dropped (zeroized) and the answer is `locked`.
+fn install(app: &AppHandle, vault: Vault, generation: u64) -> IpcResult<DatabaseView> {
+    let result = view(&vault);
+    let refused = lock(&app.state::<VaultState>().0)?.install(vault, generation);
+    if refused.is_err() {
+        tracing::info!("locked while opening: database discarded");
+        return Err(IpcError::LOCKED);
+    }
+    app.state::<AutoLock>().touch();
     Ok(result)
 }
 
-/// Drops the vault (its secrets are zeroized) and clears the clipboard if it
-/// still holds a copied value.
-#[tauri::command]
-pub fn lock_vault(state: State<'_, VaultState>, clipboard: State<'_, Clipboard>) -> IpcResult<()> {
-    let vault = lock(&state.0)?.take();
+/// Drops the vault (its secrets are zeroized), invalidates any unlock in
+/// progress and clears the clipboard if it still holds a copied value.
+/// Returns whether a vault was open. A poisoned mutex does not stop a lock.
+pub fn lock_session(state: &VaultState, clipboard: &Clipboard) -> bool {
+    let vault = state
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .lock();
+    let was_open = vault.is_some();
     drop(vault);
     clipboard.clear_if_unchanged(None);
+    was_open
+}
+
+#[tauri::command]
+pub fn lock_vault(state: State<'_, VaultState>, clipboard: State<'_, Clipboard>) {
+    lock_session(&state, &clipboard);
     tracing::info!("vault locked");
-    Ok(())
+}
+
+/// User input in the UI (throttled there): restarts the inactivity delay.
+#[tauri::command]
+pub fn activity(autolock: State<'_, AutoLock>) {
+    autolock.touch();
 }
 
 #[tauri::command]

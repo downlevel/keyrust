@@ -2345,6 +2345,7 @@ version = "0.0.1"
 dependencies = [
  "arboard",
  "keyrust-core",
+ "keyrust-os",
  "secrecy",
  "serde",
  "serde_json",
@@ -2387,7 +2388,9 @@ name = "keyrust-os"
 version = "0.0.1"
 dependencies = [
  "core-foundation",
+ "serde",
  "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

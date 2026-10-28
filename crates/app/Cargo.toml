@@ -25,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 keyrust-core = { path = "../core" }
+keyrust-os = { path = "../os" }
 tauri = { version = "2", features = [] }
 # Called from Rust only: no plugin permission is granted to the webview.
 tauri-plugin-dialog = "2"

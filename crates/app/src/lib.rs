@@ -7,6 +7,7 @@
 //! The dialog and opener plugins are called from Rust only: no capability
 //! grants the webview any of their permissions.
 
+mod autolock;
 mod clipboard;
 mod commands;
 mod error;
@@ -18,6 +19,7 @@ use keyrust_core::settings;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
+use autolock::{AutoLock, Reason};
 use clipboard::{Board, Clipboard, SystemBoard};
 #[allow(clippy::wildcard_imports)] // generate_handler! below lists bare names
 use commands::*;
@@ -35,6 +37,7 @@ pub const COMMANDS: &[&str] = &[
     "unlock",
     "create",
     "lock_vault",
+    "activity",
     "database_info",
     "tree",
     "list_entries",
@@ -120,6 +123,7 @@ pub fn run() {
             }
             app.manage(Clipboard::new(board));
             app.set_menu(menu::build(app.handle())?)?;
+            autolock::start(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -133,18 +137,19 @@ pub fn run() {
         .on_window_event(|window, event| {
             // With a database open, closing the window goes through the UI's
             // Quit command, which handles unsaved changes first.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let open = window
-                    .state::<VaultState>()
-                    .0
-                    .lock()
-                    .map(|v| v.is_some())
-                    .unwrap_or(false);
-                if open && window.emit(menu::MENU_EVENT, "quit").is_ok() {
-                    api.prevent_close();
-                } else {
-                    window.state::<Clipboard>().clear_if_unchanged(None);
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let open = window.state::<VaultState>().is_open();
+                    if open && window.emit(menu::MENU_EVENT, "quit").is_ok() {
+                        api.prevent_close();
+                    } else {
+                        window.state::<Clipboard>().clear_if_unchanged(None);
+                    }
                 }
+                WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
+                    window.state::<AutoLock>().trigger(Reason::Minimize);
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -158,6 +163,7 @@ pub fn run() {
             unlock,
             create,
             lock_vault,
+            activity,
             database_info,
             tree,
             list_entries,

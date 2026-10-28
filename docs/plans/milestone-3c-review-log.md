@@ -24,3 +24,16 @@
 ## Round 4 — stessa sessione — **APPROVED**, 0 findings — plan sha256 79b207c3…b60
 - Result: `/tmp/claude-0/-opt-apps-password-manager/8dafc736-041e-41d6-8225-8c7780d29f3a/scratchpad/claudex/m3cr1/claudex-fbtpjmrt/result.json`. Limiti dichiarati dal reviewer: rilevamento della sospensione su
   macOS euristico; decompressione e XML ostile restano limiti documentati.
+
+## Implementazione — scostamenti dal piano (Claude)
+- **D-Bus in `crates/os`, non nel crate app**: `on_suspend` su Linux (logind `PrepareForSleep(true)`, bus di sistema) e
+  nuovo `on_screen_lock` (`ActiveChanged(true)` di qualsiasi interfaccia `*.ScreenSaver`, quindi anche GNOME, MATE e
+  Cinnamon oltre a `org.freedesktop.ScreenSaver`). Motivo: il crate app non si compila sulla macchina di sviluppo (niente
+  WebKitGTK), `crates/os` sì, e il codice è comunque safe. `zbus` 5 era già nel lockfile tramite tauri-plugin-opener.
+  `SuspendGuard` è diventato `Guard`.
+- **Un solo thread locker**: tutti i trigger inviano un `Reason` su un canale; né la callback di power di Windows né il
+  rilevatore di salti d'orologio aspettano il mutex del vault, che un salvataggio tiene durante la KDF (altrimenti un
+  salvataggio lento sembrerebbe una sospensione).
+- Il polling dello schermo (Windows, macOS) agisce sul **fronte** bloccato/sbloccato, non a ogni giro.
+- La logica pura (`Session`, `idle_expired`, `suspended`, `should_lock`) sta in `crates/app/src/autolock/policy.rs`;
+  verificata in locale con un crate di prova che la include, il resto con `cargo clippy --target x86_64-pc-windows-msvc`.
