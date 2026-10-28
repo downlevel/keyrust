@@ -134,3 +134,6 @@ export interface Settings {
 export interface AppInfo {
 	version: string;
 }
+
+/** Why the backend locked the vault on its own (`locked` event). */
+export type LockReason = "idle" | "screenLock" | "suspend" | "minimize";

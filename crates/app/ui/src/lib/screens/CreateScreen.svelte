@@ -204,6 +204,7 @@
 								>{m.kdf_memory()}<input
 									type="number"
 									min="8"
+									max="2048"
 									class="{small} font-mono"
 									bind:value={memoryMib}
 								/></label
@@ -212,6 +213,7 @@
 								>{m.kdf_iterations()}<input
 									type="number"
 									min="1"
+									max="1000"
 									class="{small} font-mono"
 									bind:value={iterations}
 								/></label
@@ -220,6 +222,7 @@
 								>{m.kdf_parallelism()}<input
 									type="number"
 									min="1"
+									max="256"
 									class="{small} font-mono"
 									bind:value={parallelism}
 								/></label

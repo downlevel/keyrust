@@ -26,6 +26,7 @@ export type VaultErrorKind =
 	| "locked"
 	| "io"
 	| "notDurable"
+	| "tooExpensive"
 	| "cancelled";
 
 /** Errors carry a kind for the UI to translate, never a secret or a path. */
@@ -53,6 +54,8 @@ export interface VaultApi {
 	unlock(path: string, password: string): Promise<DatabaseInfo>;
 	create(options: CreateOptions): Promise<DatabaseInfo>;
 	lock(): Promise<void>;
+	/** User input, at most every few seconds: restarts the backend's idle delay. */
+	activity(): Promise<void>;
 	databaseInfo(): Promise<DatabaseInfo>;
 	tree(): Promise<GroupNode>;
 	/** Every entry, recycle bin included. */

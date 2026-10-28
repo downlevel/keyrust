@@ -25,6 +25,7 @@ describe("TauriVault", () => {
 		});
 		await vault.benchmarkKdf(64, 2);
 		await vault.lock();
+		await vault.activity();
 		await vault.create({
 			path: "/a/c.kdbx",
 			name: "C",
@@ -51,6 +52,7 @@ describe("TauriVault", () => {
 			],
 			["benchmark_kdf", { memoryMib: 64, parallelism: 2 }],
 			["lock_vault", undefined],
+			["activity", undefined],
 			[
 				"create",
 				{

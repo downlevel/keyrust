@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { isTauri } from "@tauri-apps/api/core";
 	import { onMount } from "svelte";
-	import type { Apis } from "$lib/api";
+	import type { Apis, LockReason } from "$lib/api";
 	import * as Dialog from "$lib/components/ui/dialog/index.js";
 	import CommandPalette from "$lib/components/app/CommandPalette.svelte";
 	import ConfirmDialog from "$lib/components/app/ConfirmDialog.svelte";
@@ -30,19 +30,36 @@
 		// Back to Keyrust: did another app change the file meanwhile?
 		const onFocus = () => void app.checkExternal();
 		window.addEventListener("focus", onFocus);
-		let unlisten: (() => void) | undefined;
+		// Any input restarts the backend's idle delay (throttled by the state).
+		const onActivity = () => app.reportActivity();
+		const activityEvents = ["keydown", "pointerdown", "pointermove", "wheel"] as const;
+		for (const name of activityEvents) {
+			window.addEventListener(name, onActivity, { capture: true, passive: true });
+		}
+		const unlisten: (() => void)[] = [];
 		if (isTauri()) {
-			// Native menu clicks arrive as `menu` events carrying the command id.
-			void import("@tauri-apps/api/event").then(({ listen }) =>
-				listen<string>("menu", (event) => {
-					if (isCommandId(event.payload)) void app.run(event.payload);
-				}).then((stop) => (unlisten = stop)),
-			);
+			void import("@tauri-apps/api/event").then(async ({ listen }) => {
+				// Native menu clicks arrive as `menu` events carrying the command id.
+				unlisten.push(
+					await listen<string>("menu", (event) => {
+						if (isCommandId(event.payload)) void app.run(event.payload);
+					}),
+				);
+				// The backend locked the vault (idle, screen lock, sleep, minimize).
+				unlisten.push(
+					await listen<{ reason: LockReason }>("locked", (event) =>
+						app.autoLocked(event.payload.reason),
+					),
+				);
+			});
 		}
 		return () => {
 			document.removeEventListener("copy", onCopy);
 			window.removeEventListener("focus", onFocus);
-			unlisten?.();
+			for (const name of activityEvents) {
+				window.removeEventListener(name, onActivity, { capture: true });
+			}
+			for (const stop of unlisten) stop();
 		};
 	});
 

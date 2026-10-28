@@ -641,3 +641,106 @@ describe("3b second inspection regressions (guard waiting)", () => {
 		expect(app.screen).toBe("vault");
 	});
 });
+
+describe("automatic lock", () => {
+	/** The demo vault posing as the real one, for what the demo never does. */
+	function asReal(vault: DemoVault) {
+		return Object.defineProperty(vault, "isDemo", { value: false });
+	}
+
+	it("clears the session like Lock, without calling the backend or asking", async () => {
+		const { app, vault } = await unlocked();
+		const lock = vi.spyOn(vault, "lock");
+		await app.selectEntry("github");
+		await app.toggleReveal();
+		await app.editEntry("github");
+		app.updateDraft({ username: "changed" });
+		app.autoLocked("idle");
+		expect(lock).not.toHaveBeenCalled();
+		expect(app.confirm).toBeNull();
+		expect(app.screen).toBe("unlock");
+		expect(app.selectedId).toBeNull();
+		expect(app.revealed).toBeNull();
+		expect(app.editor).toBeNull();
+		expect(app.entries).toEqual([]);
+		expect(app.lockNotice).toEqual({ reason: "idle", minutes: 5, lostChanges: true });
+	});
+
+	it("records the reason and no lost changes when everything was saved", async () => {
+		const { app } = await unlocked();
+		app.autoLocked("screenLock");
+		expect(app.lockNotice).toEqual({ reason: "screenLock", minutes: 5, lostChanges: false });
+	});
+
+	it("is ignored when nothing is open or being opened", async () => {
+		const app = new AppState({ vault: new DemoVault({ delayMs: 0 }), app: new MemoryAppApi() });
+		await app.init();
+		app.autoLocked("suspend");
+		expect(app.lockNotice).toBeNull();
+		expect(app.screen).toBe("unlock");
+	});
+
+	it("abandons an unlock in progress", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		const late = deferred<Awaited<ReturnType<DemoVault["unlock"]>>>();
+		const real = vault.unlock.bind(vault);
+		vault.unlock = () => late.promise;
+		const pending = app.unlock("secret");
+		app.autoLocked("screenLock");
+		expect(app.busy).toBeNull();
+		expect(app.lockNotice?.reason).toBe("interrupted");
+		late.resolve(await real(app.recents[0].path, "secret"));
+		await pending;
+		expect(app.screen).toBe("unlock");
+		expect(app.db).toBeNull();
+	});
+
+	it("explains an unlock the backend discarded because of a lock", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		vault.unlock = () => Promise.reject(new VaultError("locked"));
+		await app.unlock("secret");
+		expect(app.unlockError).toBeNull();
+		expect(app.lockNotice?.reason).toBe("interrupted");
+		app.selectRecent(1);
+		expect(app.lockNotice).toBeNull();
+	});
+
+	it("a database beyond the open limits gets its own message", async () => {
+		const vault = new DemoVault({ delayMs: 0 });
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		vault.unlock = () => Promise.reject(new VaultError("tooExpensive"));
+		await app.unlock("secret");
+		expect(app.unlockError).toBe("tooExpensive");
+	});
+
+	it("reports activity at most every 15 seconds, only with a vault open", async () => {
+		const vault = asReal(new DemoVault({ delayMs: 0 }));
+		const activity = vi.spyOn(vault, "activity");
+		const app = new AppState({ vault, app: new MemoryAppApi() });
+		await app.init();
+		app.reportActivity(1_000);
+		expect(activity).not.toHaveBeenCalled();
+		await app.unlock("secret");
+		app.reportActivity(1_000);
+		app.reportActivity(15_999);
+		expect(activity).toHaveBeenCalledTimes(1);
+		app.reportActivity(16_000);
+		expect(activity).toHaveBeenCalledTimes(2);
+		app.lock();
+		app.reportActivity(40_000);
+		expect(activity).toHaveBeenCalledTimes(2);
+	});
+
+	it("never reports activity in the demo", async () => {
+		const { app, vault } = await unlocked();
+		const activity = vi.spyOn(vault, "activity");
+		app.reportActivity(1_000);
+		app.reportActivity(100_000);
+		expect(activity).not.toHaveBeenCalled();
+	});
+});
