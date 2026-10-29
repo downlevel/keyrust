@@ -28,7 +28,8 @@
 ## Build — Claude (builder), base `6229bfe`
 - Autorizzazione: l'utente ha confermato l'implementazione il 2026-10-29. Approvazione del piano verificata
   (`runner.py check`): sha256 `0ff713d9…67b` invariato.
-- Commit: `2fc628e` (core), `6a5e1a4` (UI, audit), `aad5931` (e2e, screenshot, CI), `3674b65` (documenti).
+- Commit: `2fc628e` (core), `6a5e1a4` (UI, audit), `aad5931` (e2e, screenshot, CI), `3674b65` (documenti),
+  poi le correzioni emerse in CI (sotto), fino a `ed7ebc2`.
   Autore di tutto il codice: Claude. Codex non ha scritto codice.
 
 ### Baseline dell'audit (prima delle correzioni, `pnpm test:web a11y`)
@@ -69,3 +70,19 @@ di ciascun test non erano raggiunti.
   `settings.json` nel percorso XDG atteso). Lo scenario gira solo in CI.
 - Link relativi di README, SECURITY e documenti: nessuno rotto.
 - `keyrust-app` (Rust) non modificato: clippy Windows con il finto `llvm-rc` non necessario.
+
+### CI e difetto trovato dall'e2e
+- Audit a11y in CI: il pulsante *Benchmark* di Create ritorna attivo con `transition-all` alla fine del
+  benchmark automatico; axe lo misurava a metà dissolvenza. L'audit ora attende le animazioni
+  (`Promise.allSettled`, perché quelle annullate rifiutano `finished`).
+- E2E: senza bus di sessione GTK aspettava ~25 s il portale → `dbus-run-session`. Log non leggibili senza
+  login: in caso di errore la coda filtrata del log diventa un'annotazione pubblica, con lo stato della
+  pagina e del bootstrap di SvelteKit.
+- **Difetto dell'app (non del test)**: su Linux (e quasi certamente macOS) la UI è servita da
+  `tauri://localhost`, URL non speciale con percorso vuoto e origin opaco; il router di SvelteKit non trovava
+  la rotta e ricaricava la pagina all'infinito: finestra vuota. Windows (`http://tauri.localhost/`) non era
+  colpito. Correzione `4ed52f7`: finestra caricata a `"url": "/"`, con test di configurazione
+  (`the_window_loads_a_url_with_a_path`). macOS da verificare a mano.
+- WebKitWebDriver restituisce testo vuoto per gli elementi `truncate`: lo smoke test legge `textContent`.
+- Run finale `ed7ebc2`: tutti i job verdi — core ×3, app ×3 (audit a11y su Linux), deny, fuzz, e2e (scenario
+  completo e `keepassxc-cli show` sulla copia salvata con il titolo modificato; copia KDBX 3.1 identica).
