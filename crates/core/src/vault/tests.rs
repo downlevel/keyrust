@@ -172,6 +172,31 @@ fn kdbx31_is_read_and_saved_as_kdbx4() {
 }
 
 #[test]
+fn the_reported_version_changes_only_when_the_file_is_replaced() {
+    use crate::kdbx::limits::Limits;
+    let (f, mut vault) = fixture_copy("keepassxc-kdbx31.kdbx");
+    vault.rename_database("Renamed").expect("rename");
+
+    vault.max_file_bytes = 100;
+    let before = std::fs::read(&f.path).expect("read");
+    assert!(matches!(vault.save(), Err(VaultError::TooExpensive)));
+    assert_eq!(vault.info().version, (3, 1), "after a refused save");
+    assert_eq!(std::fs::read(&f.path).expect("read"), before);
+    vault.max_file_bytes = Limits::DEFAULT.max_file_bytes;
+
+    let external = external_bytes();
+    std::fs::write(&f.path, &external).expect("external write");
+    assert!(matches!(vault.save(), Err(VaultError::ExternalChange)));
+    assert_eq!(vault.info().version, (3, 1), "after an external change");
+    assert_eq!(std::fs::read(&f.path).expect("read"), external);
+
+    vault.save_overwrite().expect("keep mine");
+    assert_eq!(vault.info().version, (4, 1));
+    let reopened = Vault::open(&f.path, secret(FIXTURE_PASSWORD)).expect("reopen");
+    assert_eq!(reopened.info().version, (4, 1));
+}
+
+#[test]
 fn an_aes_kdf_database_keeps_its_kdf_unless_asked() {
     let (f, mut vault) = fixture_copy("keepassxc-rich.kdbx");
     let before = vault.info().kdf;

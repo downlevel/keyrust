@@ -295,11 +295,38 @@ impl Vault {
     fn write(&mut self, expected: Option<Stamp>, overwrite: bool) -> Result<()> {
         let path = self.path.clone().ok_or(VaultError::NoFile)?;
         // keepass-rs writes KDBX 4.1 only: KDBX 3.1 and 4.0 files (KeePassXC
-        // writes 4.0 when no 4.1 feature is used) are upgraded on save.
-        let latest = DatabaseConfig::default().version;
-        if self.db.config.version != latest {
-            self.db.config.version = latest;
+        // writes 4.0 when no 4.1 feature is used) are upgraded on save. The
+        // version only changes once the file is replaced, so `info()` always
+        // reports the version of the file on disk.
+        let previous = std::mem::replace(
+            &mut self.db.config.version,
+            DatabaseConfig::default().version,
+        );
+        let written = self.serialise_and_replace(&path, expected, overwrite);
+        let (bytes, durability) = match written {
+            Ok(done) => done,
+            Err(e) => {
+                self.db.config.version = previous;
+                return Err(e);
+            }
+        };
+        self.stamp = Some(Stamp::of(&bytes));
+        if let Some(new) = self.pending.take() {
+            self.committed = new;
         }
+        self.dirty = false;
+        tracing::info!(entries = self.db.num_entries(), "vault saved");
+        durability
+    }
+
+    /// Serialises the database and replaces the file. On `Ok` the file was
+    /// replaced; the second value is whether that is confirmed durable.
+    fn serialise_and_replace(
+        &self,
+        path: &Path,
+        expected: Option<Stamp>,
+        overwrite: bool,
+    ) -> Result<(Vec<u8>, Result<()>)> {
         let secret = self.pending.as_ref().unwrap_or(&self.committed);
         let mut bytes = Vec::new();
         self.db.save(&mut bytes, key(secret)).map_err(|e| {
@@ -314,31 +341,23 @@ impl Vault {
             );
             return Err(VaultError::TooExpensive);
         }
-        let mut durability = Ok(());
-        match file::replace(&path, &bytes, expected.as_ref(), overwrite) {
-            Ok(()) => {}
+        match file::replace(path, &bytes, expected.as_ref(), overwrite) {
+            Ok(()) => Ok((bytes, Ok(()))),
             // The file was replaced but the directory sync failed: the state
-            // below must follow the file on disk, and the caller is told.
+            // must follow the file on disk, and the caller is told.
             Err(ReplaceError::NotDurable(e)) => {
                 tracing::warn!(error_kind = ?e.kind(), "saved, but not confirmed durable");
-                durability = Err(VaultError::NotDurable(e.kind()));
+                Ok((bytes, Err(VaultError::NotDurable(e.kind()))))
             }
             Err(ReplaceError::Changed) => {
                 tracing::warn!("save refused: file changed by another application");
-                return Err(VaultError::ExternalChange);
+                Err(VaultError::ExternalChange)
             }
             Err(ReplaceError::Io(e)) => {
                 tracing::warn!(error_kind = ?e.kind(), "cannot save vault");
-                return Err(e.into());
+                Err(e.into())
             }
         }
-        self.stamp = Some(Stamp::of(&bytes));
-        if let Some(new) = self.pending.take() {
-            self.committed = new;
-        }
-        self.dirty = false;
-        tracing::info!(entries = self.db.num_entries(), "vault saved");
-        durability
     }
 
     /// Re-reads the file with the committed key ("Reload"), dropping unsaved
