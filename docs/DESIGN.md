@@ -106,11 +106,16 @@ App desktop: finestra minima 800×560.
 
 ## Accessibilità e contenuti
 - **Accessibilità**:
-  - contrasto WCAG AA su testo e componenti (verificare `zinc-500` su bianco per il testo secondario);
-  - focus ring indaco visibile su ogni elemento interattivo; ordine di tab logico sidebar → ricerca → lista → dettaglio;
+  - contrasto WCAG AA su testo e componenti, verificato sui token da `src/tests/contrast.test.ts`; dopo
+    l'audit della Milestone 4a il testo secondario è `oklch(52% …)` (zinc-500 non bastava su `muted` e
+    sulla selezione), i bordi dei campi `oklch(63% …)`, i segmenti di robustezza amber-600 / emerald-600 /
+    emerald-700;
+  - focus ring indaco **pieno, 2 px**, visibile su ogni elemento interattivo; ordine di tab logico
+    sidebar → ricerca → lista → dettaglio;
   - navigazione completa da tastiera e pannello "Keyboard Shortcuts" (Ctrl+/);
   - ruoli ARIA: `tree` per i gruppi, `listbox` per le voci, `aria-live="polite"` per toast e countdown appunti;
-  - la robustezza password è comunicata anche via testo, non solo colore; rispetto di `prefers-reduced-motion`.
+  - la robustezza password è comunicata anche via testo, non solo colore; rispetto di `prefers-reduced-motion`;
+  - verifiche automatiche, eccezioni e checklist manuale: [ACCESSIBILITY.md](ACCESSIBILITY.md).
 - **Microcopy / tono**: inglese, breve, diretto, rassicurante, mai allarmista; verbi d'azione sui pulsanti
   ("Unlock", "Copy password", "Create database"). Spiegazioni tecniche solo in "Advanced". Esempi:
   - errore sblocco: "Wrong password or key. Check Caps Lock and try again."

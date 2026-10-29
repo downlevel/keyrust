@@ -97,7 +97,10 @@ Il modello è quello di KDBX4; Keyrust non aggiunge entità proprie nel file.
 - Gestione allegati in UI (gli allegati esistenti vengono comunque preservati).
 - Merge automatico dei conflitti di sync.
 
-## Domande aperte
-- Strategia sui **conflitti di sync** (file modificato da un altro client mentre è aperto): in V1 basta
-  rilevare la modifica esterna e avvisare prima di sovrascrivere? DA DEFINIRE.
-- Gestione in sola lettura dei **database KDBX3.1** (aprire e proporre l'upgrade a KDBX4?). DA DEFINIRE.
+## Decisioni (ex domande aperte, chiuse nella Milestone 4a)
+- **Conflitti di sync**: in V1 Keyrust rileva la modifica esterna (lunghezza + SHA-256 del file, prima e
+  durante il salvataggio) e rifiuta di sovrascrivere; l'utente sceglie *Reload* (rilegge il file, perde le
+  modifiche non salvate) o *Keep mine* (sovrascrive). Nessun merge (fuori scope).
+- **KDBX 3.1 e 4.0**: si aprono in lettura e scrittura; il primo salvataggio li converte in KDBX 4.1.
+  All'apertura un avviso informativo e non bloccante lo dice ("Saving converts it to KDBX 4.1, which very
+  old KeePass clients cannot open"); sparisce dopo il primo salvataggio riuscito o con *Dismiss*.

@@ -65,10 +65,17 @@
 - [ ] Verifica manuale con KeePassDX (Android) e Strongbox (iOS) su un DB sincronizzato
 
 ## Milestone 4 — Polish & deploy
+### 4a — accessibilità, e2e, documentazione
 - [ ] Audit accessibilità: contrasto AA, focus, ARIA (`tree`, `listbox`, `aria-live`), ordine di tab, reduced motion
-- [ ] Test e2e smoke (tauri-driver) su Linux in CI
-- [ ] `SECURITY.md` definitivo con threat model completo
-- [ ] README curato: screenshot, feature, threat model sintetico, diagramma architettura, istruzioni di build, confronto con KeePassXC
+  - [x] verifiche automatiche in CI (axe, tastiera, focus, reduced motion, contrasto dei token) e correzioni (4a)
+  - [ ] checklist manuale con Narrator e zoom 200% su Windows *(task utente, [DEVELOPMENT.md](DEVELOPMENT.md#manual-accessibility-checklist))*
+- [x] Test e2e smoke (tauri-driver) su Linux in CI (4a)
+- [x] `SECURITY.md` definitivo con threat model completo (4a)
+- [x] README curato: screenshot, feature, threat model sintetico, diagramma architettura, istruzioni di build, confronto con KeePassXC (4a)
+- [x] Domande aperte del PRD chiuse: conflitti di sync, KDBX 3.1/4.0 con avviso di conversione (4a)
+- [x] `DatabaseInfo.version` segue il file su disco anche dopo un salvataggio rifiutato (4a)
+
+### 4b — rilascio
 - [ ] Pipeline di release su tag: build tre OS, checksum SHA-256, firma artefatti (minisign/cosign), bozza GitHub Release
 - [ ] Decidere ed eventualmente configurare la firma codice Windows (Authenticode) e macOS (Developer ID + notarizzazione)
 - [ ] Build riproducibili "best effort" (`SOURCE_DATE_EPOCH`, lockfile, toolchain fissata) e documentazione per verificarle
