@@ -72,8 +72,15 @@
 	>
 		<Dialog.Title class="sr-only">{m.palette_label()}</Dialog.Title>
 		<Command.Root>
-			<Command.Input placeholder={m.palette_placeholder()} aria-label={m.palette_label()} />
-			<Command.List class="max-h-[360px]">
+			<Command.Input
+				placeholder={m.palette_placeholder()}
+				aria-label={m.palette_label()}
+				aria-controls="palette-list"
+				aria-expanded="true"
+			/>
+			<!-- Arrow keys in the field move through the list; the list itself is
+			     focusable so it can also be scrolled from the keyboard. -->
+			<Command.List id="palette-list" class="max-h-[360px]" tabindex={-1}>
 				<Command.Empty>{m.palette_empty()}</Command.Empty>
 				<Command.Group heading={m.palette_commands()}>
 					{#each commands as c (c.id)}

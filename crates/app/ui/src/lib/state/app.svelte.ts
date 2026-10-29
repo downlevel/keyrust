@@ -123,8 +123,12 @@ export class AppState {
 	/** An editor save is in flight: the form and navigation wait for it. */
 	savingEntry = $state(false);
 
-	toast = $state<{ field: Field; secs: number } | null>(null);
+	/** `id` changes with every copy, so each one is announced, even an identical one. */
+	toast = $state<{ field: Field; secs: number; total: number; id: number } | null>(null);
+	private copies = 0;
 	banner = $state<"externalChange" | "saveFailed" | null>(null);
+	/** The KDBX 3.1 / 4.0 conversion notice was dismissed for this session. */
+	versionNoticeDismissed = $state(false);
 	saveState = $state<"saved" | "saving" | "failed">("saved");
 	/**
 	 * The vault has changes that are not in the file: set by every change,
@@ -184,6 +188,18 @@ export class AppState {
 	}
 
 	// ---------------------------------------------------------------- derived
+
+	/**
+	 * The open file is older than KDBX 4.1, which every save writes. Gone once
+	 * a save replaced the file (the backend then reports 4.1) or on Dismiss;
+	 * back at the next unlock of a file that was never saved.
+	 */
+	readonly versionNotice: string | null = $derived.by(() => {
+		const version = this.db?.version;
+		if (!version || this.versionNoticeDismissed) return null;
+		const [major, minor] = version;
+		return major < 4 || (major === 4 && minor < 1) ? `${major}.${minor}` : null;
+	});
 
 	readonly groups: FlatGroup[] = $derived.by(() => {
 		const out: FlatGroup[] = [];
@@ -414,6 +430,7 @@ export class AppState {
 		this.revealed = null;
 		this.editor = null;
 		this.banner = null;
+		this.versionNoticeDismissed = false;
 		this.saveState = "saved";
 		this.screen = "vault";
 	}
@@ -581,7 +598,10 @@ export class AppState {
 		const list = this.visibleEntries;
 		if (!list.length) return;
 		const index = list.findIndex((e) => e.id === this.selectedId);
-		const next = list[Math.min(list.length - 1, Math.max(0, index < 0 ? 0 : index + delta))];
+		// Without a visible selection, End goes to the last entry and any
+		// other move to the first; Home and End are absolute either way.
+		const target = index < 0 ? (delta === Infinity ? list.length - 1 : 0) : index + delta;
+		const next = list[Math.min(list.length - 1, Math.max(0, target))];
 		if (next.id !== this.selectedId) void this.selectEntry(next.id);
 	}
 
@@ -613,7 +633,8 @@ export class AppState {
 			return;
 		}
 		if (session !== this.session) return;
-		this.toast = { field, secs: secs ?? this.settings.clipboard_clear_secs };
+		const total = secs ?? this.settings.clipboard_clear_secs;
+		this.toast = { field, secs: total, total, id: ++this.copies };
 		this.startToastTimer();
 	}
 
@@ -871,6 +892,10 @@ export class AppState {
 				// follows the file; the banner offers to write it again.
 				this.vaultDirty = false;
 				this.banner = "saveFailed";
+				// The file was replaced, so its version is now the one written
+				// (a KDBX 3.1 file is 4.1 now).
+				const info = await this.api.vault.databaseInfo().catch(() => null);
+				if (info && session === this.session) this.db = info;
 			} else {
 				this.banner = kind === "externalChange" ? "externalChange" : "saveFailed";
 			}

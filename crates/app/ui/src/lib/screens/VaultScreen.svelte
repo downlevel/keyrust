@@ -32,6 +32,37 @@
 		!app.editor?.isNew && app.visibleEntries.some((e) => e.id === app.selectedId),
 	);
 
+	const listName = $derived.by(() => {
+		const query = app.query.trim();
+		if (query) return m.entries_matching({ query });
+		if (app.groupId === ALL) return m.all_entries();
+		if (app.groupId === app.recycleBinId) return m.entries_in_group({ group: m.recycle_bin() });
+		const group = app.groups.find((g) => g.id === app.groupId);
+		return group ? m.entries_in_group({ group: group.name }) : m.entries_label();
+	});
+
+	/**
+	 * Search results are announced once typing pauses, not at every key.
+	 * The visible count below is not a live region.
+	 */
+	let announcement = $state("");
+	$effect(() => {
+		const query = app.query.trim();
+		const count = app.visibleEntries.length;
+		if (!query) {
+			announcement = "";
+			return;
+		}
+		const text =
+			count === 0
+				? m.search_results_none()
+				: count === 1
+					? m.entry_count_one()
+					: m.entry_count_many({ count: String(count) });
+		const timer = setTimeout(() => (announcement = text), 500);
+		return () => clearTimeout(timer);
+	});
+
 	const caption = $derived(
 		app.visibleEntries.length === 1
 			? m.entry_count_one()
@@ -60,9 +91,15 @@
 	}
 
 	function onEntryKeydown(event: KeyboardEvent, id: string) {
-		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+		const moves: Record<string, number> = {
+			ArrowDown: 1,
+			ArrowUp: -1,
+			Home: -Infinity,
+			End: Infinity,
+		};
+		if (event.key in moves) {
 			event.preventDefault();
-			app.moveSelection(event.key === "ArrowDown" ? 1 : -1);
+			app.moveSelection(moves[event.key]);
 			void focusSelected();
 		} else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
 			event.preventDefault();
@@ -126,13 +163,12 @@
 				<SlidersHorizontal class="size-4" aria-hidden="true" />
 				{#if !collapsed}{m.settings_button()}{/if}
 			</button>
-			{#if !collapsed}
-				<span
-					class="ml-auto pr-1 text-xs text-muted-foreground"
-					role="status"
-					data-testid="save-status">{status}</span
-				>
-			{/if}
+			<!-- Always mounted: the collapsed sidebar still announces saves. -->
+			<span
+				class={collapsed ? "sr-only" : "ml-auto pr-1 text-xs text-muted-foreground"}
+				role="status"
+				data-testid="save-status">{status}</span
+			>
 		</div>
 	</nav>
 
@@ -152,7 +188,10 @@
 				}}
 			/>
 			<div class="flex items-center justify-between">
-				<span class="text-xs text-muted-foreground" aria-live="polite">{caption}</span>
+				<span class="text-xs text-muted-foreground">{caption}</span>
+				<span class="sr-only" aria-live="polite" data-testid="search-announcement"
+					>{announcement}</span
+				>
 				<button
 					type="button"
 					class="flex h-7 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium text-primary hover:bg-muted"
@@ -164,10 +203,11 @@
 				</button>
 			</div>
 		</div>
+		<!-- A listbox must contain options: without entries it is a plain region. -->
 		<div
 			bind:this={list}
-			role="listbox"
-			aria-label={m.entries_label()}
+			role={app.visibleEntries.length ? "listbox" : undefined}
+			aria-label={app.visibleEntries.length ? listName : undefined}
 			class="flex-1 overflow-y-auto p-1.5"
 		>
 			{#each app.visibleEntries as entry, index (entry.id)}
@@ -237,6 +277,18 @@
 						size="sm"
 						class="bg-destructive text-destructive-foreground hover:bg-destructive-hover"
 						onclick={() => void app.persist()}>{m.banner_retry()}</Button
+					>
+				{/snippet}
+			</Banner>
+		{/if}
+		{#if app.versionNotice}
+			<Banner tone="info" message={m.banner_version({ version: app.versionNotice })}>
+				{#snippet actions()}
+					<Button
+						size="sm"
+						variant="outline"
+						onclick={() => (app.versionNoticeDismissed = true)}
+						>{m.banner_dismiss()}</Button
 					>
 				{/snippet}
 			</Banner>

@@ -44,7 +44,7 @@
 	}
 
 	const field =
-		"h-[38px] rounded-lg border border-input bg-background px-3 outline-none focus:border-ring focus:ring-3 focus:ring-ring/20";
+		"h-[38px] rounded-lg border border-input bg-background px-3 outline-none focus:border-ring focus:ring-2 focus:ring-ring";
 </script>
 
 {#if editor}
@@ -98,6 +98,7 @@
 							id="editor-password"
 							value={editor?.draft.password ?? ""}
 							showCapsWarning={false}
+							describedby="editor-password-strength"
 							oninput={(value) => app.updateDraft({ password: value })}
 						/>
 					</div>
@@ -115,13 +116,14 @@
 						<Popover.Content
 							class="w-[380px] rounded-xl p-4"
 							align="end"
+							role="dialog"
 							aria-label={m.generator_title()}
 						>
 							<PasswordGenerator />
 						</Popover.Content>
 					</Popover.Root>
 				</div>
-				<StrengthMeter estimate={strength} />
+				<StrengthMeter estimate={strength} id="editor-password-strength" />
 			</div>
 
 			<div class="flex flex-col gap-1.5">
@@ -156,7 +158,7 @@
 				<label for="editor-notes" class="text-[13px] font-medium">{m.field_notes()}</label>
 				<textarea
 					id="editor-notes"
-					class="min-h-24 resize-y rounded-lg border border-input bg-background px-3 py-2.5 outline-none focus:border-ring focus:ring-3 focus:ring-ring/20"
+					class="min-h-24 resize-y rounded-lg border border-input bg-background px-3 py-2.5 outline-none focus:border-ring focus:ring-2 focus:ring-ring"
 					rows="4"
 					value={editor.draft.notes}
 					oninput={(e) => app.updateDraft({ notes: e.currentTarget.value })}></textarea>

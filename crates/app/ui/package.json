@@ -8,13 +8,15 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "pnpm paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check": "pnpm paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p e2e-web",
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"tauri": "cd .. && tauri",
 		"test": "pnpm paraglide && vitest run",
-		"paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
+		"paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide",
+		"test:web": "playwright test -c e2e-web",
+		"screenshots": "KEYRUST_SCREENSHOTS=1 playwright test -c e2e-web screenshots.spec.ts"
 	},
 	"license": "GPL-3.0-or-later",
 	"dependencies": {
@@ -23,11 +25,13 @@
 		"@tauri-apps/api": "^2"
 	},
 	"devDependencies": {
+		"@axe-core/playwright": "4.14.0",
 		"@eslint/js": "^10.0.1",
 		"@inlang/paraglide-js": "^2.29.1",
 		"@inlang/plugin-message-format": "^4.5.5",
 		"@internationalized/date": "^3.12.4",
 		"@lucide/svelte": "^1.61.0",
+		"@playwright/test": "1.48.2",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.65.1",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",

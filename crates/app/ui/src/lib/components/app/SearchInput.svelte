@@ -28,7 +28,7 @@
 </script>
 
 <div
-	class="flex h-9 items-center gap-2 rounded-lg border border-border bg-surface pr-2 pl-2.5 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20"
+	class="flex h-9 items-center gap-2 rounded-lg border border-input bg-surface pr-2 pl-2.5 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring"
 >
 	<Search class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 	<input

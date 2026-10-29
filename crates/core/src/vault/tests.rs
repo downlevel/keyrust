@@ -171,6 +171,116 @@ fn kdbx31_is_read_and_saved_as_kdbx4() {
     );
 }
 
+/// The KDBX 3.1 fixture with one byte of its protected stream key (outer
+/// header field 8) changed, as a sync provider could without the password.
+fn kdbx31_with_changed_stream_key() -> Vec<u8> {
+    let mut bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/keepassxc-kdbx31.kdbx"),
+    )
+    .expect("fixture");
+    let mut pos = 12;
+    loop {
+        let id = bytes[pos];
+        let len = usize::from(u16::from_le_bytes([bytes[pos + 1], bytes[pos + 2]]));
+        if id == 8 {
+            bytes[pos + 3] ^= 0x01;
+            return bytes;
+        }
+        assert_ne!(id, 0, "no protected stream key field");
+        pos += 3 + len;
+    }
+}
+
+#[test]
+fn a_kdbx31_header_that_does_not_match_its_header_hash_is_refused() {
+    let tampered = kdbx31_with_changed_stream_key();
+    // keepass-rs alone accepts it: protected values would decrypt to garbage.
+    assert!(Database::parse(&tampered, key(&secret(FIXTURE_PASSWORD))).is_ok());
+    assert!(matches!(
+        Vault::open_bytes(&tampered, secret(FIXTURE_PASSWORD)),
+        Err(VaultError::InvalidFormat)
+    ));
+
+    // Reload too: the file is replaced on disk by the tampered copy.
+    let (f, mut vault) = fixture_copy("keepassxc-kdbx31.kdbx");
+    std::fs::write(&f.path, &tampered).expect("tamper");
+    assert!(matches!(vault.reload(), Err(VaultError::InvalidFormat)));
+    assert_eq!(vault.info().version, (3, 1), "the vault is left as it was");
+}
+
+#[test]
+fn the_kdbx3_header_hash_is_read_as_xml() {
+    use base64::Engine as _;
+    let hash = [7u8; 32];
+    let b64 = base64::engine::general_purpose::STANDARD.encode(hash);
+    let doc = |meta: &str| format!("<KeePassFile><Meta>{meta}</Meta><Root/></KeePassFile>");
+    // Whitespace in the tag and around the value, CDATA, a comment beside it.
+    for meta in [
+        format!("<HeaderHash>{b64}</HeaderHash>"),
+        format!("<HeaderHash >\n  {b64}\n</HeaderHash >"),
+        format!("<HeaderHash><![CDATA[{b64}]]></HeaderHash>"),
+        format!("<!-- <HeaderHash>AAAA</HeaderHash> --><HeaderHash>{b64}</HeaderHash>"),
+    ] {
+        assert_eq!(
+            header_hash_from_xml(&doc(&meta)).expect(&meta),
+            Some(hash),
+            "{meta}"
+        );
+    }
+    // Absent: only a commented-out one, or none at all.
+    for meta in [
+        String::new(),
+        format!("<!-- <HeaderHash>{b64}</HeaderHash> -->"),
+    ] {
+        assert_eq!(
+            header_hash_from_xml(&doc(&meta)).expect(&meta),
+            None,
+            "{meta}"
+        );
+    }
+    // Duplicate, not base64, wrong length, outside Meta's structure.
+    for meta in [
+        format!("<HeaderHash>{b64}</HeaderHash><HeaderHash>{b64}</HeaderHash>"),
+        "<HeaderHash>not base64!</HeaderHash>".to_owned(),
+        "<HeaderHash>AAAA</HeaderHash>".to_owned(),
+    ] {
+        assert!(
+            matches!(
+                header_hash_from_xml(&doc(&meta)),
+                Err(VaultError::InvalidFormat)
+            ),
+            "{meta}"
+        );
+    }
+    assert!(header_hash_from_xml("<Other/>").is_err());
+    assert!(header_hash_from_xml("<KeePassFile><Meta/><Meta/></KeePassFile>").is_err());
+}
+
+#[test]
+fn the_reported_version_changes_only_when_the_file_is_replaced() {
+    use crate::kdbx::limits::Limits;
+    let (f, mut vault) = fixture_copy("keepassxc-kdbx31.kdbx");
+    vault.rename_database("Renamed").expect("rename");
+
+    vault.max_file_bytes = 100;
+    let before = std::fs::read(&f.path).expect("read");
+    assert!(matches!(vault.save(), Err(VaultError::TooExpensive)));
+    assert_eq!(vault.info().version, (3, 1), "after a refused save");
+    assert_eq!(std::fs::read(&f.path).expect("read"), before);
+    vault.max_file_bytes = Limits::DEFAULT.max_file_bytes;
+
+    let external = external_bytes();
+    std::fs::write(&f.path, &external).expect("external write");
+    assert!(matches!(vault.save(), Err(VaultError::ExternalChange)));
+    assert_eq!(vault.info().version, (3, 1), "after an external change");
+    assert_eq!(std::fs::read(&f.path).expect("read"), external);
+
+    vault.save_overwrite().expect("keep mine");
+    assert_eq!(vault.info().version, (4, 1));
+    let reopened = Vault::open(&f.path, secret(FIXTURE_PASSWORD)).expect("reopen");
+    assert_eq!(reopened.info().version, (4, 1));
+}
+
 #[test]
 fn an_aes_kdf_database_keeps_its_kdf_unless_asked() {
     let (f, mut vault) = fixture_copy("keepassxc-rich.kdbx");

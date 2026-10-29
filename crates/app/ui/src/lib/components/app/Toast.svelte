@@ -14,18 +14,27 @@
 	};
 </script>
 
-<!-- The live region always exists so that screen readers announce updates. -->
-<div
-	class="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center"
-	aria-live="polite"
->
+<!-- The live region always exists so that screen readers announce updates.
+     It holds one sentence per copy; the visible countdown is not announced. -->
+<div class="sr-only" aria-live="polite" data-testid="toast-announcement">
+	{#if app.toast}
+		<!-- A new node per copy: an identical sentence is announced again. -->
+		{#key app.toast.id}<span
+				>{m.toast_copied_announcement({
+					field: fieldNames[app.toast.field](),
+					secs: String(app.toast.total),
+				})}</span
+			>{/key}
+	{/if}
+</div>
+<div class="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center">
 	{#if app.toast}
 		<div
-			role="status"
+			data-testid="toast"
 			class="pointer-events-auto flex items-center gap-2.5 rounded-[10px] bg-toast py-2 pr-2 pl-3.5 text-[13px] text-toast-foreground shadow-lg"
 		>
 			<Check class="size-4 text-toast-icon" aria-hidden="true" strokeWidth={2.4} />
-			<span
+			<span aria-hidden="true"
 				>{m.toast_copied({
 					field: fieldNames[app.toast.field](),
 					secs: String(app.toast.secs),
@@ -33,7 +42,7 @@
 			>
 			<button
 				type="button"
-				class="flex size-6 items-center justify-center rounded-md text-toast-foreground/70 hover:bg-white/10 hover:text-toast-foreground"
+				class="flex size-6 items-center justify-center rounded-md text-toast-foreground/70 hover:bg-white/10 hover:text-toast-foreground focus-visible:outline-toast-foreground"
 				aria-label={m.toast_dismiss()}
 				onclick={() => app.dismissToast()}
 			>

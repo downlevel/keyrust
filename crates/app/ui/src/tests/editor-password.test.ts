@@ -14,7 +14,7 @@ it("the password of a new entry can be typed and is saved", async () => {
 	render(App, { apis: { vault, app: new MemoryAppApi() } });
 	await user.type(await screen.findByLabelText("Master password"), "secret");
 	await user.click(screen.getByRole("button", { name: "Unlock" }));
-	await screen.findByRole("listbox", { name: "Entries" });
+	await screen.findByRole("listbox", { name: /entries/i });
 	await user.click(screen.getByRole("button", { name: "New entry" }));
 	const field = await screen.findByLabelText("Password");
 	await user.type(screen.getByLabelText("Title"), "Typed");

@@ -80,6 +80,38 @@ a verification). To skip them knowingly, set `KEYRUST_SKIP_KEEPASSXC=1`
 
 Regenerate the KeePassXC fixtures (Linux/macOS/Git Bash): `scripts/gen-fixtures.sh`.
 
+### Accessibility audit and screenshots
+
+The audit (axe, keyboard, focus, reduced motion; see [ACCESSIBILITY.md](ACCESSIBILITY.md)) drives the
+demo build in Chromium through Playwright:
+
+```sh
+cd crates/app/ui
+pnpm exec playwright install chromium   # once; CI adds --with-deps
+pnpm test:web                           # builds, serves on 127.0.0.1:4173, runs e2e-web/
+pnpm test:web keyboard                  # one file
+pnpm screenshots                        # regenerates docs/screenshots/*.png (never in CI)
+```
+
+Failures leave a trace in `crates/app/ui/test-results/` (`pnpm exec playwright show-trace …`).
+`KEYRUST_SCREENSHOT_SCALE=1.5 pnpm screenshots` makes smaller PNGs if one exceeds 400 KB.
+
+### End-to-end test of the desktop app
+
+`crates/app/e2e` drives the real app (Rust backend, IPC, WebKitGTK) with WebdriverIO and
+[tauri-driver](https://v2.tauri.app/develop/tests/webdriver/). It runs in the CI `e2e` job on Linux only:
+tauri-driver does not support macOS, and on Windows it needs a matching msedgedriver. It opens copies
+of the fixtures from a pre-filled recent-files list in a temporary `XDG_CONFIG_HOME`; the app has no test
+hook. On a Linux machine with the Tauri prerequisites:
+
+```sh
+sudo apt-get install webkit2gtk-driver xvfb dbus
+cargo install tauri-driver --locked --version 2.1.0
+(cd crates/app/ui && pnpm install && pnpm tauri build --debug --no-bundle)
+pnpm --dir crates/app/e2e install
+xvfb-run -a dbus-run-session -- pnpm --dir crates/app/e2e test    # KEYRUST_E2E_DIR chooses the work folder
+```
+
 ### Logs
 
 The app logs to stderr only. `KEYRUST_LOG=debug pnpm tauri dev` shows more detail (still no
@@ -102,7 +134,8 @@ to `main` and manually (*Actions* → *CI* → *Run workflow*):
 | Job | What it does |
 |---|---|
 | `core` (Linux, Windows, macOS) | installs KeePassXC; fmt (Linux), clippy and tests of `keyrust-core` |
-| `app` (Linux, Windows, macOS) | frontend check/lint/format/test/build; workspace clippy; `keyrust-app` tests (security configuration); debug build of the desktop app |
+| `app` (Linux, Windows, macOS) | frontend check/lint/format/test/build; accessibility audit (Linux); workspace clippy; `keyrust-app` tests (security configuration); debug build of the desktop app |
+| `e2e` (Linux) | builds the app, runs the smoke test under Xvfb, then checks the saved file with `keepassxc-cli` |
 | `deny` | `cargo deny check` (licences, advisories, sources) |
 | `fuzz` | every cargo-fuzz target for 60 s |
 
@@ -164,3 +197,25 @@ on pull requests, pushes to `main` and manual runs). With an installer from a gr
 - [ ] Optional: in the KeePassXC GUI create two databases with password `keyrust-test-password`
       (Database → Database Settings → Security → Encryption settings): one with **ChaCha20 + Argon2id**,
       one with **AES-256 + Argon2d**; send them back to be added as fixtures.
+
+## Manual accessibility checklist
+
+On Windows, with tools already present (no installation): run `pnpm tauri dev` or an installer from
+CI. Record the result in [ACCESSIBILITY.md](ACCESSIBILITY.md#manual-checklist).
+
+- [ ] Start Narrator (Ctrl+Win+Enter). On the Unlock screen it reads the database name and the
+      "Master password" field; a wrong password is announced as an error
+- [ ] Unlock with the keyboard only. In the vault, Tab goes sidebar → search → list → details; in the
+      group tree Narrator reads each group with its count ("Work, 3 entries"), in the list each entry
+      as an option with its position
+- [ ] Select an entry and copy its password (Ctrl+C): Narrator announces "Password copied. The
+      clipboard clears in 20 seconds." once, not every second
+- [ ] Type in the search field: the number of results is announced after a pause
+- [ ] Open the editor (Enter or Ctrl+E): every field has its label; the password field is described by
+      its strength; the show/hide button says whether it is pressed
+- [ ] Open Settings (Ctrl+,): the focus moves into it, Tab stays inside, Escape closes it and returns
+      the focus where it was
+- [ ] Zoom to 200% (Ctrl+plus, four times): nothing is cut off and no content needs horizontal
+      scrolling to be read; Ctrl+0 restores
+- [ ] Windows high contrast (Settings → Accessibility → Contrast themes), observation only: text,
+      focus and selection stay visible and the app stays usable

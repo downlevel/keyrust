@@ -21,12 +21,12 @@ async function unlock(user: ReturnType<typeof userEvent.setup>, password = "secr
 async function openVault() {
 	const ctx = setup();
 	await unlock(ctx.user);
-	await screen.findByRole("listbox", { name: "Entries" });
+	await screen.findByRole("listbox", { name: /entries/i });
 	return ctx;
 }
 
 const option = (name: RegExp | string) =>
-	within(screen.getByRole("listbox", { name: "Entries" })).getByRole("option", { name });
+	within(screen.getByRole("listbox", { name: /entries/i })).getByRole("option", { name });
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -99,6 +99,24 @@ describe("vault", () => {
 		expect(screen.getByText("Password copied · clears in 19s")).toBeInTheDocument();
 		await vi.advanceTimersByTimeAsync(19000);
 		expect(screen.queryByText(/copied · clears/)).not.toBeInTheDocument();
+	});
+
+	it("announces every copy once, even an identical one, and not the countdown (M4A-R04)", async () => {
+		const { user } = await openVault();
+		await user.click(option(/GitHub/));
+		await screen.findByRole("heading", { name: "GitHub" });
+		vi.useFakeTimers();
+		const region = screen.getByTestId("toast-announcement");
+		const sentence = "Password copied. The clipboard clears in 20 seconds.";
+		await fireEvent.click(screen.getByRole("button", { name: "Copy password" }));
+		await vi.waitFor(() => expect(region).toHaveTextContent(sentence));
+		const first = region.firstElementChild;
+		await vi.advanceTimersByTimeAsync(1000);
+		// The countdown changes the visible toast, not the announcement.
+		expect(region.firstElementChild).toBe(first);
+		await fireEvent.click(screen.getByRole("button", { name: "Copy password" }));
+		await vi.waitFor(() => expect(region.firstElementChild).not.toBe(first));
+		expect(region).toHaveTextContent(sentence);
 	});
 
 	it("creates an entry, requiring a title", async () => {
@@ -288,7 +306,7 @@ describe("database settings (milestone 3b)", () => {
 		const user = userEvent.setup();
 		render(App, { apis: { vault, app: new MemoryAppApi() } });
 		await unlock(user);
-		await screen.findByRole("listbox", { name: "Entries" });
+		await screen.findByRole("listbox", { name: /entries/i });
 		await user.keyboard("{Control>}k{/Control}");
 		await user.type(await screen.findByRole("combobox"), "Database Settings");
 		await user.keyboard("{Enter}");
@@ -337,7 +355,7 @@ describe("master password fields (M3B-R03)", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 		await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
 		await unlock(user);
-		await screen.findByRole("listbox", { name: "Entries" });
+		await screen.findByRole("listbox", { name: /entries/i });
 		await user.keyboard("{Control>}k{/Control}");
 		await user.type(await screen.findByRole("combobox"), "Database Settings");
 		await user.keyboard("{Enter}");

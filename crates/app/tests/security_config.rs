@@ -148,3 +148,13 @@ fn ipc_commands_are_the_expected_ones() {
         .collect();
     assert_eq!(registered, keyrust_app_lib::COMMANDS);
 }
+
+#[test]
+fn the_window_loads_a_url_with_a_path() {
+    // Linux and macOS serve the UI from `tauri://localhost`, a non-special URL
+    // whose path is empty: SvelteKit's router then finds no route and reloads
+    // the page forever (found by the e2e smoke test). An explicit "/" gives
+    // every platform the path the router expects.
+    let conf = read_json("tauri.conf.json");
+    assert_eq!(conf["app"]["windows"][0]["url"], "/");
+}

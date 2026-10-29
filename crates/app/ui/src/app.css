@@ -22,7 +22,9 @@
 	--secondary: var(--color-zinc-100);
 	--secondary-foreground: var(--color-zinc-900);
 	--muted: var(--color-zinc-100);
-	--muted-foreground: var(--color-zinc-500);
+	/* Between zinc-500 and zinc-600: zinc-500 is below 4.5:1 on muted and
+	   selection backgrounds (src/tests/contrast.test.ts). */
+	--muted-foreground: oklch(52% 0.016 285.938);
 	--accent: var(--color-zinc-100);
 	--accent-foreground: var(--color-zinc-900);
 	/* Selected rows: indigo-50 background, indigo-800 text, indigo bar. */
@@ -45,9 +47,10 @@
 	--warning-soft-foreground: var(--color-amber-900);
 	--warning-strong: var(--color-amber-700);
 	--strength-1: var(--color-red-600);
-	--strength-2: var(--color-amber-500);
-	--strength-3: var(--color-emerald-500);
-	--strength-4: var(--color-emerald-600);
+	/* Segments are graphics: at least 3:1 against the background. */
+	--strength-2: var(--color-amber-600);
+	--strength-3: var(--color-emerald-600);
+	--strength-4: var(--color-emerald-700);
 	--toast: var(--color-zinc-900);
 	--toast-foreground: var(--color-zinc-50);
 	--toast-icon: var(--color-emerald-400);
@@ -66,7 +69,8 @@
 	--avatar-5-bg: var(--color-violet-50);
 	--avatar-5-fg: var(--color-violet-700);
 	--border: var(--color-zinc-200);
-	--input: var(--color-zinc-300);
+	/* Input boundaries: at least 3:1 against every surface (WCAG 1.4.11). */
+	--input: oklch(63% 0.015 286.067);
 	--ring: var(--color-indigo-600);
 	--chart-1: var(--color-zinc-300);
 	--chart-2: var(--color-zinc-500);

@@ -191,6 +191,24 @@ describe("leaving a modified editor", () => {
 	});
 });
 
+describe("list navigation", () => {
+	it("Home and End are absolute, with or without a visible selection (M4A-R02)", async () => {
+		const { app } = await unlocked();
+		const titles = () => app.visibleEntries.map((e) => e.id);
+		expect(app.selectedId).toBeNull();
+		app.moveSelection(Infinity);
+		await vi.waitFor(() => expect(app.selectedId).toBe(titles().at(-1)));
+		app.moveSelection(-Infinity);
+		await vi.waitFor(() => expect(app.selectedId).toBe(titles()[0]));
+		// The selected entry is filtered out of the list: End still goes last.
+		app.setQuery("git");
+		const visible = titles();
+		expect(visible).not.toContain(app.selectedId);
+		app.moveSelection(Infinity);
+		await vi.waitFor(() => expect(app.selectedId).toBe(visible.at(-1)));
+	});
+});
+
 describe("entries, groups and saving", () => {
 	it("delete moves to the recycle bin, restore brings it back", async () => {
 		const { app } = await unlocked();

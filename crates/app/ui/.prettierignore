@@ -4,3 +4,5 @@ node_modules/
 pnpm-lock.yaml
 src/lib/paraglide/
 project.inlang/
+test-results/
+playwright-report/

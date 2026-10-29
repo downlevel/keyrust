@@ -97,6 +97,77 @@ fn check_limits(bytes: &[u8], limits: &Limits) -> Result<()> {
     })
 }
 
+/// Parses a database. For KDBX 3.1 it also checks the `HeaderHash` that
+/// keepass-rs 0.17 ignores: a KDBX 3 outer header has no HMAC, so without it
+/// a changed field (the protected stream key, field 8) would go unnoticed and
+/// protected values would decrypt to garbage that the next save makes
+/// permanent. KDBX 4 authenticates its header itself.
+fn parse(bytes: &[u8], password: &SecretString) -> Result<Database> {
+    let db = Database::parse(bytes, key(password)).map_err(map_open_error)?;
+    if matches!(db.config.version, DatabaseVersion::KDB3(_)) {
+        check_kdbx3_header_hash(bytes, password)?;
+    }
+    Ok(db)
+}
+
+fn check_kdbx3_header_hash(bytes: &[u8], password: &SecretString) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let len = header::kdbx3_header_len(bytes).map_err(|_| VaultError::InvalidFormat)?;
+    // The decrypted XML holds field values: wiped when dropped, and read in
+    // place (no copy of the whole text).
+    let xml = zeroize::Zeroizing::new(
+        Database::get_xml(&mut &bytes[..], key(password)).map_err(map_open_error)?,
+    );
+    let text = std::str::from_utf8(&xml).map_err(|_| VaultError::InvalidFormat)?;
+    match header_hash_from_xml(text)? {
+        Some(expected) if expected[..] == Sha256::digest(&bytes[..len])[..] => Ok(()),
+        Some(_) => {
+            tracing::warn!("database refused: KDBX 3 header does not match its HeaderHash");
+            Err(VaultError::InvalidFormat)
+        }
+        None => {
+            // KeePass before 2.20 did not write it (KeePassXC also accepts that);
+            // it cannot be removed without the key, being inside the encrypted part.
+            tracing::warn!("KDBX 3 file without HeaderHash: header not verified");
+            Ok(())
+        }
+    }
+}
+
+/// `KeePassFile/Meta/HeaderHash`, read as XML (whitespace in tags, comments,
+/// CDATA): `None` only when the element is absent. A duplicate element, or a
+/// value that is not the base64 of 32 bytes, makes the file invalid.
+fn header_hash_from_xml(xml: &str) -> Result<Option<[u8; 32]>> {
+    use base64::Engine as _;
+    let doc = roxmltree::Document::parse(xml).map_err(|_| VaultError::InvalidFormat)?;
+    let root = doc.root_element();
+    if !root.has_tag_name("KeePassFile") {
+        return Err(VaultError::InvalidFormat);
+    }
+    let mut metas = root.children().filter(|n| n.has_tag_name("Meta"));
+    let (Some(meta), None) = (metas.next(), metas.next()) else {
+        return Err(VaultError::InvalidFormat);
+    };
+    let mut hashes = meta.children().filter(|n| n.has_tag_name("HeaderHash"));
+    let hash = match (hashes.next(), hashes.next()) {
+        (None, _) => return Ok(None),
+        (Some(hash), None) => hash,
+        (Some(_), Some(_)) => return Err(VaultError::InvalidFormat),
+    };
+    let value: String = hash
+        .children()
+        .filter(|n| n.is_text())
+        .filter_map(|n| n.text())
+        .collect();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(value.trim())
+        .map_err(|_| VaultError::InvalidFormat)?;
+    decoded
+        .try_into()
+        .map(Some)
+        .map_err(|_| VaultError::InvalidFormat)
+}
+
 fn map_open_error(e: DatabaseOpenError) -> VaultError {
     match e {
         DatabaseOpenError::Key(DatabaseKeyError::IncorrectKey | DatabaseKeyError::EmptyKey) => {
@@ -220,7 +291,7 @@ impl Vault {
     ) -> Result<Self> {
         check_limits(bytes, limits)?;
         check_version(bytes)?;
-        let db = Database::parse(bytes, key(&password)).map_err(map_open_error)?;
+        let db = parse(bytes, &password)?;
         Ok(Self {
             db,
             path: None,
@@ -295,11 +366,38 @@ impl Vault {
     fn write(&mut self, expected: Option<Stamp>, overwrite: bool) -> Result<()> {
         let path = self.path.clone().ok_or(VaultError::NoFile)?;
         // keepass-rs writes KDBX 4.1 only: KDBX 3.1 and 4.0 files (KeePassXC
-        // writes 4.0 when no 4.1 feature is used) are upgraded on save.
-        let latest = DatabaseConfig::default().version;
-        if self.db.config.version != latest {
-            self.db.config.version = latest;
+        // writes 4.0 when no 4.1 feature is used) are upgraded on save. The
+        // version only changes once the file is replaced, so `info()` always
+        // reports the version of the file on disk.
+        let previous = std::mem::replace(
+            &mut self.db.config.version,
+            DatabaseConfig::default().version,
+        );
+        let written = self.serialise_and_replace(&path, expected, overwrite);
+        let (bytes, durability) = match written {
+            Ok(done) => done,
+            Err(e) => {
+                self.db.config.version = previous;
+                return Err(e);
+            }
+        };
+        self.stamp = Some(Stamp::of(&bytes));
+        if let Some(new) = self.pending.take() {
+            self.committed = new;
         }
+        self.dirty = false;
+        tracing::info!(entries = self.db.num_entries(), "vault saved");
+        durability
+    }
+
+    /// Serialises the database and replaces the file. On `Ok` the file was
+    /// replaced; the second value is whether that is confirmed durable.
+    fn serialise_and_replace(
+        &self,
+        path: &Path,
+        expected: Option<Stamp>,
+        overwrite: bool,
+    ) -> Result<(Vec<u8>, Result<()>)> {
         let secret = self.pending.as_ref().unwrap_or(&self.committed);
         let mut bytes = Vec::new();
         self.db.save(&mut bytes, key(secret)).map_err(|e| {
@@ -314,31 +412,23 @@ impl Vault {
             );
             return Err(VaultError::TooExpensive);
         }
-        let mut durability = Ok(());
-        match file::replace(&path, &bytes, expected.as_ref(), overwrite) {
-            Ok(()) => {}
+        match file::replace(path, &bytes, expected.as_ref(), overwrite) {
+            Ok(()) => Ok((bytes, Ok(()))),
             // The file was replaced but the directory sync failed: the state
-            // below must follow the file on disk, and the caller is told.
+            // must follow the file on disk, and the caller is told.
             Err(ReplaceError::NotDurable(e)) => {
                 tracing::warn!(error_kind = ?e.kind(), "saved, but not confirmed durable");
-                durability = Err(VaultError::NotDurable(e.kind()));
+                Ok((bytes, Err(VaultError::NotDurable(e.kind()))))
             }
             Err(ReplaceError::Changed) => {
                 tracing::warn!("save refused: file changed by another application");
-                return Err(VaultError::ExternalChange);
+                Err(VaultError::ExternalChange)
             }
             Err(ReplaceError::Io(e)) => {
                 tracing::warn!(error_kind = ?e.kind(), "cannot save vault");
-                return Err(e.into());
+                Err(e.into())
             }
         }
-        self.stamp = Some(Stamp::of(&bytes));
-        if let Some(new) = self.pending.take() {
-            self.committed = new;
-        }
-        self.dirty = false;
-        tracing::info!(entries = self.db.num_entries(), "vault saved");
-        durability
     }
 
     /// Re-reads the file with the committed key ("Reload"), dropping unsaved
@@ -349,7 +439,7 @@ impl Vault {
             .ok_or(VaultError::TooExpensive)?;
         check_limits(&bytes, &Limits::DEFAULT)?;
         check_version(&bytes)?;
-        let db = Database::parse(&bytes, key(&self.committed)).map_err(map_open_error)?;
+        let db = parse(&bytes, &self.committed)?;
         self.db = db;
         self.stamp = Some(Stamp::of(&bytes));
         self.pending = None;
