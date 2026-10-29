@@ -87,6 +87,36 @@ export const config: WebdriverIO.Config = {
 			console.log(
 				`page state after "${test.title}": ${JSON.stringify(state)}`,
 			);
+			// Did SvelteKit's inline bootstrap run (a CSP block would stop it),
+			// and do its module imports load?
+			const boot = await browser
+				.execute(async () => {
+					const kit = Object.keys(window).filter((k) =>
+						k.startsWith("__sveltekit"),
+					);
+					const source = [...document.scripts]
+						.map((s) => s.textContent ?? "")
+						.join("\n");
+					const imports = [...source.matchAll(/import\("([^"]+)"\)/g)].map(
+						(m) => m[1],
+					);
+					const results: string[] = [];
+					for (const url of imports) {
+						try {
+							await import(/* @vite-ignore */ url);
+							results.push(`${url}: ok`);
+						} catch (e) {
+							results.push(`${url}: ${String(e)}`);
+						}
+					}
+					return {
+						kit,
+						results,
+						body: document.body?.innerHTML.slice(0, 400) ?? "",
+					};
+				})
+				.catch((e: unknown) => ({ error: String(e) }));
+			console.log(`page boot after "${test.title}": ${JSON.stringify(boot)}`);
 			const name = test.title.replace(/[^\w-]+/g, "_");
 			await browser.saveScreenshot(
 				join(paths().artifacts, `${name}.png`),

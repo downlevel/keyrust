@@ -241,9 +241,9 @@ jobs:
             # Test results and app logs only, without the D-Bus and portal noise;
             # an annotation holds about 4 KB.
             clean=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$RUNNER_TEMP/e2e.log")
-            { grep -m 2 'page state' <<<"$clean" | cut -c 1-800
+            { grep -m 2 -E 'page (state|boot)' <<<"$clean" | cut -c 1-1200
               grep -E '^\[(0-0|wry)|Error|keyrust_' <<<"$clean" |
-                grep -vE 'WARNING|dbus-daemon|page state|^\[0-0\] *$' | tail -c 2200
+                grep -vE 'WARNING|dbus-daemon|page (state|boot)|^\[0-0\] *$' | tail -c 1500
             } |
               python3 -c "import sys; print('::error title=e2e log (filtered)::' + sys.stdin.read().replace('%','%25').replace('\r','').replace('\n','%0A'))"
           fi
