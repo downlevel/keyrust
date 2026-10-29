@@ -108,3 +108,16 @@ di ciascun test non erano raggiunti.
 - M4A-R06 (low) README: la ricerca della UI non copre le note → ACCETTATO (affermazione corretta).
 - M4A-R07 (low) README: "never silently overwrite" troppo forte → ACCETTATO, con rimando alla corsa residua.
 - Verifica dopo le correzioni: Vitest 250, Playwright 54, check/lint/format verdi.
+
+## Ispezione 3 (fuori budget, autorizzata dall'utente) — stesso CLI e modello, effort `high` (sessione 01a1875b-e55b-7ea3-8df0-531c3c4915bd) — REVISE (1 high, 2 medium)
+- Result: `…/scratchpad/claudex/i3/claudex-zyy4gcgq/result.json`. 150 letture, 418 s, snapshot `e63f65e`.
+  Nessun rilievo sulle correzioni M4A-R01…R07. CI di `e63f65e`: tutti i job verdi.
+- M4A-R08 (high, preesistente) keepass-rs 0.17.0 non verifica `HeaderHash` nei KDBX 3.1: un campo 8
+  (`ProtectedStreamKey`) alterato da un provider di sync rende illeggibili le password protette senza errore,
+  e il primo salvataggio lo rende permanente in 4.1 → VERIFICATO nel sorgente (`format/kdbx3.rs`: nessun
+  controllo; il lettore KDBX4 lo fa). Correzione possibile nel core via `Database::get_xml` + SHA-256
+  dell'intestazione. Disposizione: in attesa della decisione dell'utente.
+- M4A-R09 (medium) `setup.ts` cancella ricorsivamente `KEYRUST_E2E_DIR` senza controlli → VERIFICATO.
+  Disposizione: in attesa.
+- M4A-R10 (medium) sotto 1100 px la sidebar compressa rimuove la regione `status` del salvataggio → VERIFICATO.
+  Disposizione: in attesa.
