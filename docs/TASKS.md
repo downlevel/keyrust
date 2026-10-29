@@ -76,10 +76,11 @@
 - [x] `DatabaseInfo.version` segue il file su disco anche dopo un salvataggio rifiutato (4a)
 
 ### 4b — rilascio
-- [ ] Pipeline di release su tag: build tre OS, checksum SHA-256, firma artefatti (minisign/cosign), bozza GitHub Release
-- [ ] Decidere ed eventualmente configurare la firma codice Windows (Authenticode) e macOS (Developer ID + notarizzazione)
-- [ ] Build riproducibili "best effort" (`SOURCE_DATE_EPOCH`, lockfile, toolchain fissata) e documentazione per verificarle
-- [ ] Release `v0.1.0`
+- [x] Pipeline di release su tag: build tre OS, checksum SHA-256, firma artefatti (cosign keyless), bozza GitHub Release (4b)
+- [x] Decidere ed eventualmente configurare la firma codice Windows (Authenticode) e macOS (Developer ID + notarizzazione):
+  opzionale, attivata dai secret; nessun certificato per ora (4b, [RELEASING.md](RELEASING.md#code-signing-optional))
+- [x] Build riproducibili "best effort" (`SOURCE_DATE_EPOCH`, lockfile, toolchain fissata) e documentazione per verificarle (4b)
+- [ ] Release `v0.1.0` *(task utente: tag `v0.1.0` su `main` dopo il merge, poi pubblicare la bozza — [RELEASING.md](RELEASING.md#making-a-release))*
 
 ## Dopo l'MVP (V2)
 - [ ] Keyfile

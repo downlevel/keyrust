@@ -17,8 +17,8 @@ reporters are credited unless they prefer otherwise.
 
 | Version | Supported |
 |---|---|
-| `0.1.x` | ✅ once released |
-| `main` | ✅ best effort, until `0.1.0` is released |
+| `0.1.x` | ✅ |
+| `main` | ✅ best effort |
 | anything else | ❌ |
 
 ## Scope
@@ -226,6 +226,54 @@ production CSP.
 
 ## Verifying releases
 
-Starting with v0.1.0, release artifacts will be published with SHA-256 checksums and signatures,
-and this section will explain how to verify them. Until then, build from source
-([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
+Every release on the [Releases page](https://github.com/downlevel/keyrust/releases) carries, next
+to the installers:
+
+- `SHA256SUMS`: the SHA-256 of every installer;
+- `SHA256SUMS.sigstore.json`: a [Sigstore cosign](https://docs.sigstore.dev/cosign/) signature of
+  `SHA256SUMS`. It is *keyless*: instead of a long-lived key, it binds the file to the GitHub
+  Actions run of this repository's release workflow for that tag, and is recorded in the public
+  Rekor transparency log.
+
+Verifying takes two steps: the signature proves that `SHA256SUMS` was produced by Keyrust's release
+workflow, and the checksum proves that your installer is the one listed there.
+
+**1. Check the signature** (needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3
+or later; replace `v0.1.0` with the release you downloaded):
+
+```sh
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity "https://github.com/downlevel/keyrust/.github/workflows/release.yml@refs/tags/v0.1.0" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+It must print `Verified OK`. Any other identity means the file was not signed by a Keyrust release.
+
+**2. Check your installer** against its line of `SHA256SUMS` (you need only the installer you
+downloaded, not all of them):
+
+```sh
+# Linux
+grep ' Keyrust_0.1.0_amd64.deb$' SHA256SUMS | sha256sum -c -
+# macOS
+grep ' Keyrust_0.1.0_universal.dmg$' SHA256SUMS | shasum -a 256 -c -
+```
+
+```powershell
+# Windows (PowerShell)
+$file = "Keyrust_0.1.0_x64-setup.exe"
+$expected = (Select-String -Path SHA256SUMS -Pattern " $([regex]::Escape($file))$").Line.Split(" ")[0]
+if ((Get-FileHash $file -Algorithm SHA256).Hash -eq $expected) { "OK" } else { "MISMATCH" }
+```
+
+The check must print `OK`.
+
+**Code signing.** Installers are signed for Windows (Authenticode) or macOS (Developer ID and
+notarization) only when the maintainer has configured a certificate; the *Build* section of each
+release's notes says which. Without it, SmartScreen and Gatekeeper warn before the first launch,
+and the cosign check above is the way to know the installer is genuine.
+
+**Reproducibility.** Builds are reproducible on a best-effort basis; the release notes report
+whether the Linux binary came out identical when built twice, and
+[docs/RELEASING.md](docs/RELEASING.md#reproducing-a-build) explains how to rebuild it yourself.

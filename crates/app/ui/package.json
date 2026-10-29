@@ -1,6 +1,6 @@
 {
 	"name": "keyrust-ui",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"description": "Keyrust desktop UI (SvelteKit SPA rendered by Tauri)",
 	"type": "module",
 	"scripts": {

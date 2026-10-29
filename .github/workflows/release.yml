@@ -1,0 +1,470 @@
+name: Release
+
+# A tag v* on a commit of main builds the installers, signs their checksums with cosign
+# (keyless) and creates a draft GitHub Release; publishing the draft is a manual step.
+# Every other run is a dry run: same builds, checksums and signature, no release, no OS code
+# signing. See docs/RELEASING.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release/**
+      - crates/app/tauri.conf.json
+      - crates/app/tauri.release*.json
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.verify.outputs.release }}
+      version: ${{ steps.verify.outputs.version }}
+      source_date_epoch: ${{ steps.verify.outputs.source_date_epoch }}
+      cosign: ${{ steps.verify.outputs.cosign }}
+      windows_signing: ${{ steps.verify.outputs.windows_signing }}
+      macos_signing: ${{ steps.verify.outputs.macos_signing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: verify
+        env:
+          # The only predicate that selects a real release: a pushed tag. A manual run on a
+          # tag stays a dry run.
+          RELEASE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+          # Pull requests from forks and Dependabot get no OIDC token, so no cosign signature.
+          COSIGN: >-
+            ${{ github.event_name != 'pull_request' ||
+            (github.event.pull_request.head.repo.full_name == github.repository &&
+            github.actor != 'dependabot[bot]') }}
+          # Only whether the code-signing secrets exist, and only for a release.
+          WINDOWS_SECRETS: >-
+            ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+            format('{0}{1}{2}{3}{4}{5}',
+            secrets.AZURE_CLIENT_ID != '', secrets.AZURE_CLIENT_SECRET != '',
+            secrets.AZURE_TENANT_ID != '', vars.AZURE_SIGNING_ENDPOINT != '',
+            vars.AZURE_SIGNING_ACCOUNT != '', vars.AZURE_SIGNING_PROFILE != '') || '' }}
+          MACOS_SECRETS: >-
+            ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+            format('{0}{1}{2}{3}{4}{5}',
+            secrets.APPLE_CERTIFICATE != '', secrets.APPLE_CERTIFICATE_PASSWORD != '',
+            secrets.APPLE_SIGNING_IDENTITY != '', secrets.APPLE_API_ISSUER != '',
+            secrets.APPLE_API_KEY != '', secrets.APPLE_API_PRIVATE_KEY != '') || '' }}
+        run: |
+          if [[ "$RELEASE" == true ]]; then
+            version=$(scripts/release/check-version.sh "$GITHUB_REF_NAME")
+            # A tag outside main publishes nothing.
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not a commit of main"
+              exit 1
+            fi
+          else
+            version=$(scripts/release/check-version.sh)
+          fi
+
+          # All the secrets of one OS, or none: a partial set is a configuration mistake.
+          signing() {
+            case "$2" in
+              "" | falsefalsefalsefalsefalsefalse) echo false ;;
+              truetruetruetruetruetrue) echo true ;;
+              *) echo "::error::Some $1 code-signing secrets or variables are missing (see docs/RELEASING.md)" >&2
+                 return 1 ;;
+            esac
+          }
+          windows_signing=$(signing Windows "$WINDOWS_SECRETS")
+          macos_signing=$(signing macOS "$MACOS_SECRETS")
+
+          {
+            echo "release=$RELEASE"
+            echo "version=$version"
+            echo "source_date_epoch=$(git log -1 --format=%ct)"
+            echo "cosign=$COSIGN"
+            echo "windows_signing=$windows_signing"
+            echo "macos_signing=$macos_signing"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: verify
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+          - os: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - os: macos-latest
+            platform: macos
+            target: universal-apple-darwin
+            bundles: dmg
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.verify.outputs.source_date_epoch }}
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+    # No dependency cache in this workflow: a cache written by another branch must not end up
+    # in a signed installer.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Add the macOS targets of the universal build
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Install Tauri prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libxdo-dev libssl-dev
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: crates/app/ui/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: crates/app/ui/.node-version
+      - name: Install the frontend dependencies
+        working-directory: crates/app/ui
+        run: pnpm install --frozen-lockfile
+      - name: Remap build paths
+        run: echo "RUSTFLAGS=$(scripts/release/rustflags.sh)" >> "$GITHUB_ENV"
+
+      - name: Build (no OS code signing)
+        if: >-
+          (runner.os == 'Windows' && needs.verify.outputs.windows_signing != 'true') ||
+          (runner.os == 'macOS' && needs.verify.outputs.macos_signing != 'true') ||
+          runner.os == 'Linux'
+        working-directory: crates/app/ui
+        env:
+          # linuxdeploy's own strip cannot read the libraries of Ubuntu 24.04 (.relr.dyn);
+          # the Keyrust binary is already stripped by the release profile.
+          NO_STRIP: ${{ runner.os == 'Linux' }}
+        run: |
+          config=()
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            # Ad-hoc signature: without one the app does not start on Apple Silicon.
+            config=(--config tauri.release.macos-adhoc.json)
+            echo "Code signing: skipped (ad-hoc signature only, no Developer ID secrets)" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            echo "Code signing: skipped (no Authenticode secrets)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Code signing: not applicable on Linux (checksums are signed with cosign)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          pnpm tauri build --target "$TARGET" --bundles "$BUNDLES" "${config[@]}" -- --locked
+
+      - name: Build (Authenticode, Azure Trusted Signing)
+        if: runner.os == 'Windows' && needs.verify.outputs.windows_signing == 'true'
+        working-directory: crates/app/ui
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          cargo install trusted-signing-cli --locked --version 0.11.0
+          # Tauri runs signCommand on the app binary and on both installers (%1 = the file).
+          config="$RUNNER_TEMP/tauri.windows-signing.json"
+          node -e '
+            const [file, endpoint, account, profile] = process.argv.slice(1);
+            const cmd = ["trusted-signing-cli", "-e", endpoint, "-a", account, "-c", profile, "-d", "Keyrust", "%1"];
+            require("fs").writeFileSync(file, JSON.stringify({ bundle: { windows: { signCommand: { cmd: cmd[0], args: cmd.slice(1) } } } }));
+          ' "$config" "$SIGNING_ENDPOINT" "$SIGNING_ACCOUNT" "$SIGNING_PROFILE"
+          echo "Code signing: Authenticode (Azure Trusted Signing)" >> "$GITHUB_STEP_SUMMARY"
+          pnpm tauri build --target "$TARGET" --bundles "$BUNDLES" --config "$config" -- --locked
+
+      - name: Build (Developer ID and notarization)
+        if: runner.os == 'macOS' && needs.verify.outputs.macos_signing == 'true'
+        working-directory: crates/app/ui
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+          trap 'rm -f "$APPLE_API_KEY_PATH"' EXIT
+          printf '%s' "$APPLE_API_PRIVATE_KEY" | base64 --decode > "$APPLE_API_KEY_PATH"
+          unset APPLE_API_PRIVATE_KEY
+          echo "Code signing: Developer ID and notarization" >> "$GITHUB_STEP_SUMMARY"
+          pnpm tauri build --target "$TARGET" --bundles "$BUNDLES" -- --locked
+
+      - name: Check the universal binary
+        if: runner.os == 'macOS'
+        run: |
+          lipo -info "target/$TARGET/release/keyrust" | tee "$RUNNER_TEMP/lipo.txt"
+          grep -q x86_64 "$RUNNER_TEMP/lipo.txt" && grep -q arm64 "$RUNNER_TEMP/lipo.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  # The Linux binary built twice, on two runners and in two directories: the same bytes mean
+  # the build does not depend on the time or the path. Informational, it never blocks a release.
+  rebuild:
+    name: rebuild (${{ matrix.copy }})
+    needs: verify
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: [first, second]
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.verify.outputs.source_date_epoch }}
+      SRC: ${{ matrix.copy == 'first' && 'keyrust' || 'second-copy/src' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ${{ env.SRC }}
+          persist-credentials: false
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        working-directory: ${{ env.SRC }}
+        run: rustup toolchain install
+      - name: Install Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libxdo-dev libssl-dev
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ${{ env.SRC }}/crates/app/ui/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ${{ env.SRC }}/crates/app/ui/.node-version
+      - name: Build the binary
+        working-directory: ${{ env.SRC }}
+        run: |
+          RUSTFLAGS="$(scripts/release/rustflags.sh)"
+          export RUSTFLAGS
+          cd crates/app/ui
+          pnpm install --frozen-lockfile
+          pnpm tauri build --target x86_64-unknown-linux-gnu --no-bundle -- --locked
+          cd "$GITHUB_WORKSPACE/$SRC"
+          mkdir -p "$RUNNER_TEMP/rebuild"
+          cp target/x86_64-unknown-linux-gnu/release/keyrust "$RUNNER_TEMP/rebuild/keyrust"
+          (cd "$RUNNER_TEMP/rebuild" && sha256sum keyrust > keyrust.sha256 && cat keyrust.sha256)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rebuild-${{ matrix.copy }}
+          path: ${{ runner.temp }}/rebuild/
+          retention-days: 7
+          if-no-files-found: error
+
+  reproducibility:
+    name: reproducibility
+    needs: [verify, build, rebuild]
+    if: always() && needs.verify.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      status: ${{ steps.compare.outputs.status }}
+      first: ${{ steps.compare.outputs.first }}
+      second: ${{ steps.compare.outputs.second }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          pattern: rebuild-*
+          path: rebuild
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: bundle-linux
+          path: bundle-linux
+      - id: compare
+        run: |
+          hash() { if [[ -f "$1" ]]; then cut -d ' ' -f 1 "$1"; fi; }
+          first=$(hash rebuild/rebuild-first/keyrust.sha256)
+          second=$(hash rebuild/rebuild-second/keyrust.sha256)
+          if [[ -z "$first" || -z "$second" ]]; then
+            status="not available"
+          elif [[ "$first" == "$second" ]]; then
+            status=match
+          else
+            status=mismatch
+          fi
+          # The binary inside the .deb, for reference: the bundler may patch it, so it can
+          # differ from the rebuilds without the build being unreproducible.
+          deb_hash="not available"
+          deb=$(find bundle-linux -name '*.deb' -print -quit 2>/dev/null || true)
+          if [[ -n "$deb" ]]; then
+            dpkg-deb -x "$deb" deb-root
+            deb_hash=$(sha256sum deb-root/usr/bin/keyrust | cut -d ' ' -f 1)
+          fi
+          {
+            echo "status=$status"
+            echo "first=$first"
+            echo "second=$second"
+          } | tee -a "$GITHUB_OUTPUT"
+          {
+            echo "### Reproducibility (Linux binary)"
+            echo "- Result: **$status**"
+            echo "- First build: \`${first:-not available}\`"
+            echo "- Second build: \`${second:-not available}\`"
+            echo "- Binary inside the .deb: \`$deb_hash\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sign:
+    name: checksums and signature
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bundle-*
+          path: artifacts
+      - name: Collect the installers
+        run: |
+          mkdir dist
+          find artifacts -type f -exec mv -t dist {} +
+          scripts/release/check-assets.sh "$VERSION" dist
+          (cd dist && sha256sum -- * | LC_ALL=C sort -k 2 > SHA256SUMS && cat SHA256SUMS && sha256sum -c SHA256SUMS)
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: needs.verify.outputs.cosign == 'true'
+        with:
+          cosign-release: v3.1.4
+      - name: Sign the checksums
+        if: needs.verify.outputs.cosign == 'true'
+        working-directory: dist
+        run: |
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+          # The same check as in SECURITY.md, with the identity of this run.
+          cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+            --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            SHA256SUMS
+          echo "Signature: SHA256SUMS signed with cosign (identity https://github.com/$GITHUB_WORKFLOW_REF)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Signature skipped
+        if: needs.verify.outputs.cosign != 'true'
+        run: |
+          echo "Signature: skipped (no OIDC token on fork/Dependabot PRs)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ needs.verify.outputs.release == 'true' && 'keyrust-release' || 'keyrust-release-dryrun' }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: [verify, sign, reproducibility]
+    if: always() && needs.sign.result == 'success' && needs.verify.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      REPRO_STATUS: ${{ needs.reproducibility.outputs.status || 'not available' }}
+      REPRO_FIRST: ${{ needs.reproducibility.outputs.first }}
+      REPRO_SECOND: ${{ needs.reproducibility.outputs.second }}
+      WINDOWS_SIGNING: ${{ needs.verify.outputs.windows_signing }}
+      MACOS_SIGNING: ${{ needs.verify.outputs.macos_signing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: keyrust-release
+          path: dist
+      - name: Check the assets
+        run: |
+          count=$(find dist -maxdepth 1 -type f | wc -l)
+          if [[ "$count" -ne 7 || ! -f dist/SHA256SUMS || ! -f dist/SHA256SUMS.sigstore.json ]]; then
+            echo "::error::Expected 5 installers, SHA256SUMS and SHA256SUMS.sigstore.json; found:"
+            ls -l dist
+            exit 1
+          fi
+      - name: Write the release notes
+        run: |
+          {
+            scripts/release/changelog-section.sh "$VERSION"
+            echo
+            echo "### Build"
+            echo
+            if [[ "$WINDOWS_SIGNING" == true ]]; then
+              echo "- Windows: Authenticode-signed."
+            else
+              echo "- Windows: not code-signed."
+            fi
+            if [[ "$MACOS_SIGNING" == true ]]; then
+              echo "- macOS: signed with a Developer ID and notarized."
+            else
+              echo "- macOS: not signed with a Developer ID (ad-hoc signature only)."
+            fi
+            case "$REPRO_STATUS" in
+              match) echo "- Reproducibility check (Linux binary): match, \`$REPRO_FIRST\`." ;;
+              mismatch) echo "- Reproducibility check (Linux binary): mismatch, \`$REPRO_FIRST\` and \`$REPRO_SECOND\`." ;;
+              *) echo "- Reproducibility check (Linux binary): not available." ;;
+            esac
+            echo "- Verify your download: https://github.com/${GITHUB_REPOSITORY}/blob/main/SECURITY.md#verifying-releases"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      - name: Create or update the draft release
+        run: |
+          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ "$draft" != true ]]; then
+              echo "::error::Release $TAG is already published; it is left untouched"
+              exit 1
+            fi
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --draft --verify-tag --title "Keyrust $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "Draft release: $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)" >> "$GITHUB_STEP_SUMMARY"

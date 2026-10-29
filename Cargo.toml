@@ -8,7 +8,7 @@ exclude = ["fuzz"]
 default-members = ["crates/core"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"

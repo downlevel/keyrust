@@ -22,3 +22,19 @@
 
 ## Round 3 — stessa sessione — **APPROVED**, 0 findings — plan sha256 3147bcd6…071
 - Result: `/tmp/claude-0/-opt-apps-password-manager/396c1774-6943-4819-a44e-4e13330ae930/scratchpad/claudex/r3/claudex-sem_dyuc/result.json`. Limiti dichiarati: approvazione del piano, non dell'implementazione; revisione statica; impostazioni GitHub, credenziali di firma e installer non verificati.
+
+## Build — Claude (builder), base `612bc2d`
+- Autorizzazione: l'utente ha confermato l'implementazione il 2026-10-29, precisando che la strada senza firma codice
+  (nessuna spesa) dev'essere pienamente funzionante. Approvazione del piano verificata (`runner.py check`).
+- Prove locali: actionlint 1.7.12 (con shellcheck) su `release.yml` e `ci.yml` → 0 errori; shellcheck su
+  `scripts/release/*.sh` → 0; `check-version.sh` (senza tag, `v0.1.0` → 0; `v0.1.1`, `v0.2.0`, `0.1.0` → 1);
+  `changelog-section.sh` (0.1.0 → sezione senza link finali; 9.9.9, Unreleased → 1); `check-assets.sh` (5 file → 0;
+  mancante/extra → 1 con elenco); override Tauri (ad hoc macOS e `signCommand` Windows generato) validi contro
+  `config.schema.json` di `@tauri-apps/cli` 2.12.4 dopo il merge con `tauri.conf.json`; due `pnpm build` con lo stesso
+  `SOURCE_DATE_EPOCH` → `diff -r` identico, senza → diversi; `pnpm lint/format:check/check/test` (250 test) verdi;
+  `cargo metadata --locked --offline` nei due workspace; `cargo test -p keyrust-core` verde.
+- Deviazioni dal piano: l'override Windows non è un file committato ma è generato nello step (endpoint, account e
+  profilo vengono da variabili del repository); la riproducibilità usa due job `rebuild` paralleli (due runner, due
+  cartelle) più il job `reproducibility` che confronta; `fuzz/Cargo.lock` era già disallineato da 4a (mancava
+  `roxmltree`), riallineato alla stessa versione del lockfile principale; la verifica di partial secrets fa fallire
+  `verify` invece di produrre installer non firmati in silenzio.
