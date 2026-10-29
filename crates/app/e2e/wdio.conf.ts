@@ -52,8 +52,41 @@ export const config: WebdriverIO.Config = {
 		);
 	},
 
+	before: async () => {
+		// Collect script errors from the first moment, for the failure report.
+		await browser.execute(() => {
+			const w = window as unknown as { __errors: string[] };
+			w.__errors = [];
+			addEventListener("error", (e) =>
+				w.__errors.push(String(e.message)),
+			);
+			addEventListener("unhandledrejection", (e) =>
+				w.__errors.push(String(e.reason)),
+			);
+		});
+	},
+
 	afterTest: async (test, _context, { passed }) => {
 		if (!passed) {
+			// What the webview shows (no secret is on screen before an entry is
+			// edited or revealed, and the fixture password is public anyway).
+			const state = await browser
+				.execute(() => ({
+					url: location.href,
+					readyState: document.readyState,
+					tauri: "__TAURI_INTERNALS__" in window,
+					errors:
+						(window as unknown as { __errors?: string[] })
+							.__errors ?? [],
+					text:
+						document.body?.innerText
+							.replace(/\s+/g, " ")
+							.slice(0, 300) ?? "",
+				}))
+				.catch((e: unknown) => ({ error: String(e) }));
+			console.log(
+				`page state after "${test.title}": ${JSON.stringify(state)}`,
+			);
 			const name = test.title.replace(/[^\w-]+/g, "_");
 			await browser.saveScreenshot(
 				join(paths().artifacts, `${name}.png`),
