@@ -136,3 +136,15 @@ di ciascun test non erano raggiunti.
   confrontati come byte; assente → accettato come in KeePassXC; duplicato o malformato → rifiutato; test per
   spazi nel tag, CDATA, commenti, assenza, duplicati, base64 non valido, lunghezza errata.
 - Verifica: core 70 + 11 + 5 + 3, fuzz_seeds, clippy, fmt, `cargo deny` verdi.
+
+## Ispezione 5 (mirata a `5c20eca..0dc6afc`) — stesso CLI e modello, effort `high` (sessione 01a18779-6ad4-7000-bf8f-d3eefac0a5a6) — **APPROVED**, 0 rilievi
+- Result: `…/scratchpad/claudex/i5/…/result.json`, 99 s. Limiti dichiarati: revisione statica; copre il diff
+  incrementale, non un nuovo audit dell'intera 4a.
+- CI di `0dc6afc`: tutti i job verdi (core ×3, app ×3 con audit a11y, deny, fuzz, e2e).
+
+## Esito
+- Copertura dell'ispezione: build completo ispezionato da Codex (ispezione 2: REVISE, corretto; ispezione 3:
+  REVISE, corretto); correzioni successive ispezionate in modo mirato (4: REVISE, corretto; 5: APPROVED).
+  Tutto il codice è di Claude; nessuna modifica successiva all'ultima ispezione oltre a questo log.
+- Aperti, a carico dell'utente: checklist manuale di accessibilità (Narrator, zoom 200%) su Windows; verifica
+  a mano su macOS dell'avvio corretto (difetto `tauri://localhost`, corretto in `4ed52f7`).
