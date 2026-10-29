@@ -116,6 +116,7 @@ const PAIRS: [string, string, number, string][] = [
 	["strength-1", "popover", NON_TEXT, "strength meter in the generator"],
 	["strength-2", "popover", NON_TEXT, "strength meter in the generator"],
 	["toast-icon", "toast", NON_TEXT, "toast check mark"],
+	["toast-foreground", "toast", NON_TEXT, "focus indicator on the toast"],
 	["warning-strong", "warning-soft", NON_TEXT, "banner warning icon"],
 	["destructive", "destructive-soft", NON_TEXT, "banner error icon"],
 	["primary", "background", NON_TEXT, "selected entry bar, switches on"],

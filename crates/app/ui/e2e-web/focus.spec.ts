@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { contrastRatio, parseColor } from "../src/lib/a11y/contrast";
-import { openApp, unlock } from "./helpers";
+import { openApp, palette, unlock } from "./helpers";
 
 /**
  * Elements whose focus indicator is drawn by an ancestor: [element selector,
@@ -183,6 +183,20 @@ async function tabThrough(page: Page, max = 60, minStops = 3) {
 		minStops,
 	);
 	expect(failures).toEqual([]);
+	return [...seen.values()];
+}
+
+/** The indicator of the element that `action` focuses (it may not exist before). */
+async function focusedBy(page: Page, action: () => Promise<void>) {
+	await install(page);
+	await page.evaluate(() => (window as unknown as { __snapshot: () => void }).__snapshot());
+	await action();
+	await page.evaluate(() => Promise.allSettled(document.getAnimations().map((a) => a.finished)));
+	const stop = (await page.evaluate(() =>
+		(window as unknown as { __stop: () => unknown }).__stop(),
+	)) as Stop | null;
+	expect(stop, "something has the focus").not.toBeNull();
+	expect(stop && check(stop), stop?.selector).toBeNull();
 }
 
 test.describe("focus is visible on every tab stop", () => {
@@ -219,6 +233,51 @@ test.describe("focus is visible on every tab stop", () => {
 			await tabThrough(page);
 		});
 	}
+
+	// Overlays and transient controls (M4A-R03).
+	test("toast", async ({ page }) => {
+		await unlock(page);
+		await page.getByRole("option", { name: /GitHub/ }).click();
+		await page.getByRole("button", { name: "Copy username" }).click();
+		await expect(page.getByTestId("toast")).toBeVisible();
+		const stops = await tabThrough(page);
+		expect(stops.some((s) => s.includes('"Dismiss"'))).toBe(true);
+	});
+
+	test("generator and keyboard shortcuts", async ({ page }) => {
+		await unlock(page);
+		await page.keyboard.press("Control+g");
+		await expect(page.getByRole("dialog", { name: "Password generator" })).toBeVisible();
+		await tabThrough(page, 20);
+		await page.keyboard.press("Escape");
+		await page.keyboard.press("Control+/");
+		await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
+		await tabThrough(page, 20, 1);
+	});
+
+	test("banners", async ({ page }) => {
+		await unlock(page);
+		await palette(page, "Demo: simulate a change by another app");
+		await expect(page.getByRole("alert")).toContainText("changed by another app");
+		let stops = await tabThrough(page);
+		expect(stops.some((s) => s.includes('"Keep mine"'))).toBe(true);
+		await page.getByRole("button", { name: "Reload" }).click();
+		await palette(page, "Demo: simulate a save failure");
+		await expect(page.getByRole("alert")).toContainText("Couldn’t save");
+		stops = await tabThrough(page);
+		expect(stops.some((s) => s.includes('"Retry"'))).toBe(true);
+	});
+
+	test("group name fields", async ({ page }) => {
+		await unlock(page);
+		const work = page.getByRole("treeitem", { name: /^Work/ });
+		await work.click();
+		await focusedBy(page, () => page.keyboard.press("F2"));
+		await expect(page.getByRole("textbox", { name: "Rename group" })).toBeFocused();
+		await page.keyboard.press("Escape");
+		await focusedBy(page, () => page.getByRole("button", { name: "New group" }).click());
+		await expect(page.getByRole("textbox", { name: "New group" })).toBeFocused();
+	});
 
 	test("command palette and confirm dialog", async ({ page }) => {
 		await unlock(page);

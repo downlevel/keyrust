@@ -89,7 +89,7 @@
 	{@const selected = app.groupId === row.id}
 	{#if app.renamingGroupId === row.id}
 		<input
-			class="h-8 rounded-md border border-ring bg-background px-2 text-sm outline-none"
+			class="h-8 rounded-md border border-ring bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
 			style="margin-left: {row.depth * 16}px"
 			aria-label={m.rename_group_label()}
 			value={row.name}
@@ -148,7 +148,7 @@
 		{/each}
 		{#if app.renamingGroupId === "new"}
 			<input
-				class="h-8 rounded-md border border-ring bg-background px-2 text-sm outline-none"
+				class="h-8 rounded-md border border-ring bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
 				aria-label={m.new_group()}
 				placeholder={m.new_group_placeholder()}
 				bind:value={newName}

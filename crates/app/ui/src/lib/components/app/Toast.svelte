@@ -17,10 +17,15 @@
 <!-- The live region always exists so that screen readers announce updates.
      It holds one sentence per copy; the visible countdown is not announced. -->
 <div class="sr-only" aria-live="polite" data-testid="toast-announcement">
-	{#if app.toast}{m.toast_copied_announcement({
-			field: fieldNames[app.toast.field](),
-			secs: String(app.toast.total),
-		})}{/if}
+	{#if app.toast}
+		<!-- A new node per copy: an identical sentence is announced again. -->
+		{#key app.toast.id}<span
+				>{m.toast_copied_announcement({
+					field: fieldNames[app.toast.field](),
+					secs: String(app.toast.total),
+				})}</span
+			>{/key}
+	{/if}
 </div>
 <div class="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center">
 	{#if app.toast}
@@ -37,7 +42,7 @@
 			>
 			<button
 				type="button"
-				class="flex size-6 items-center justify-center rounded-md text-toast-foreground/70 hover:bg-white/10 hover:text-toast-foreground"
+				class="flex size-6 items-center justify-center rounded-md text-toast-foreground/70 hover:bg-white/10 hover:text-toast-foreground focus-visible:outline-toast-foreground"
 				aria-label={m.toast_dismiss()}
 				onclick={() => app.dismissToast()}
 			>

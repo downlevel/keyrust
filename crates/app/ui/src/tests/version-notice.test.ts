@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import App from "$lib/App.svelte";
 import { MemoryAppApi } from "$lib/api/app";
 import { DemoVault } from "$lib/api/demo";
-import type { DatabaseInfo } from "$lib/api";
+import { VaultError, type DatabaseInfo } from "$lib/api";
 import { AppState } from "$lib/state/app.svelte";
 
 /**
@@ -32,9 +32,25 @@ class VersionedVault extends DemoVault {
 		return { ...(await super.updateDatabase(patch)), version: this.copy() };
 	}
 
+	/** The next save replaces the file but its durability is not confirmed. */
+	notDurableNext = false;
+
 	override async save(): Promise<DatabaseInfo> {
 		const info = await super.save();
+		return this.replaced(info);
+	}
+
+	override async saveOverwrite(): Promise<DatabaseInfo> {
+		const info = await super.saveOverwrite();
+		return this.replaced(info);
+	}
+
+	private replaced(info: DatabaseInfo): DatabaseInfo {
 		this.version = [4, 1];
+		if (this.notDurableNext) {
+			this.notDurableNext = false;
+			throw new VaultError("notDurable");
+		}
 		return { ...info, version: [4, 1] };
 	}
 }
@@ -70,6 +86,17 @@ describe("KDBX conversion notice", () => {
 		expect(app.versionNotice).toBe("3.1");
 		expect(await app.persist()).toBe(true);
 		expect(app.versionNotice).toBeNull();
+	});
+
+	it("goes when the file was replaced but not confirmed durable (M4A-R01)", async () => {
+		for (const overwrite of [false, true]) {
+			const { app, vault } = await unlocked([3, 1]);
+			vault.notDurableNext = true;
+			expect(await app.persist(overwrite)).toBe(false);
+			expect(app.lastSaveError).toBe("notDurable");
+			expect(app.banner).toBe("saveFailed");
+			expect(app.versionNotice).toBeNull();
+		}
 	});
 
 	it("stays after a save refused for an external change", async () => {

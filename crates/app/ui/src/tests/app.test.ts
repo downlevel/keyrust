@@ -101,6 +101,24 @@ describe("vault", () => {
 		expect(screen.queryByText(/copied · clears/)).not.toBeInTheDocument();
 	});
 
+	it("announces every copy once, even an identical one, and not the countdown (M4A-R04)", async () => {
+		const { user } = await openVault();
+		await user.click(option(/GitHub/));
+		await screen.findByRole("heading", { name: "GitHub" });
+		vi.useFakeTimers();
+		const region = screen.getByTestId("toast-announcement");
+		const sentence = "Password copied. The clipboard clears in 20 seconds.";
+		await fireEvent.click(screen.getByRole("button", { name: "Copy password" }));
+		await vi.waitFor(() => expect(region).toHaveTextContent(sentence));
+		const first = region.firstElementChild;
+		await vi.advanceTimersByTimeAsync(1000);
+		// The countdown changes the visible toast, not the announcement.
+		expect(region.firstElementChild).toBe(first);
+		await fireEvent.click(screen.getByRole("button", { name: "Copy password" }));
+		await vi.waitFor(() => expect(region.firstElementChild).not.toBe(first));
+		expect(region).toHaveTextContent(sentence);
+	});
+
 	it("creates an entry, requiring a title", async () => {
 		const { user } = await openVault();
 		await user.click(screen.getByRole("button", { name: "New entry" }));

@@ -32,7 +32,8 @@ tests in this repository. When the code and this document disagree, that is a bu
 
 | Asset | Where it lives |
 |---|---|
-| The database contents (passwords, usernames, URLs, notes, attachments, history) | The KDBX file, encrypted. In clear only in the memory of the Rust process while unlocked |
+| Passwords, entry history, attachments, protected custom fields | The KDBX file, encrypted. While unlocked, in clear in the Rust process; a password also reaches the webview while it is edited, revealed or generated ([The webview boundary](#the-webview-boundary)) |
+| Titles, usernames, URLs, notes, group names | The KDBX file, encrypted. While unlocked, in clear in the Rust process and in the webview, which displays them |
 | The master password | Typed by the user in the webview; the Rust process keeps it in a `SecretString` while unlocked |
 | The derived key | Rust process memory, while unlocked |
 | Values copied to the clipboard | The system clipboard, until cleared |
@@ -149,6 +150,7 @@ keeps passwords out of it except when the user is working with one:
 - **Typed in the webview:** the master password (Unlock, Create, Change master password) and the
   entry fields the user types. The Unlock field is cleared after every attempt.
 
+Everything the webview displays (titles, usernames, URLs, notes, group names) is in its memory too.
 From there the limit above applies: those strings may remain in the webview's memory until it
 reuses it. A compromised webview could read whatever is open in the editor, revealed or generated,
 and could call the allowed IPC commands. It could not choose which files to open or create: paths

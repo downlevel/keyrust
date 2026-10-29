@@ -123,7 +123,9 @@ export class AppState {
 	/** An editor save is in flight: the form and navigation wait for it. */
 	savingEntry = $state(false);
 
-	toast = $state<{ field: Field; secs: number; total: number } | null>(null);
+	/** `id` changes with every copy, so each one is announced, even an identical one. */
+	toast = $state<{ field: Field; secs: number; total: number; id: number } | null>(null);
+	private copies = 0;
 	banner = $state<"externalChange" | "saveFailed" | null>(null);
 	/** The KDBX 3.1 / 4.0 conversion notice was dismissed for this session. */
 	versionNoticeDismissed = $state(false);
@@ -596,7 +598,10 @@ export class AppState {
 		const list = this.visibleEntries;
 		if (!list.length) return;
 		const index = list.findIndex((e) => e.id === this.selectedId);
-		const next = list[Math.min(list.length - 1, Math.max(0, index < 0 ? 0 : index + delta))];
+		// Without a visible selection, End goes to the last entry and any
+		// other move to the first; Home and End are absolute either way.
+		const target = index < 0 ? (delta === Infinity ? list.length - 1 : 0) : index + delta;
+		const next = list[Math.min(list.length - 1, Math.max(0, target))];
 		if (next.id !== this.selectedId) void this.selectEntry(next.id);
 	}
 
@@ -629,7 +634,7 @@ export class AppState {
 		}
 		if (session !== this.session) return;
 		const total = secs ?? this.settings.clipboard_clear_secs;
-		this.toast = { field, secs: total, total };
+		this.toast = { field, secs: total, total, id: ++this.copies };
 		this.startToastTimer();
 	}
 
@@ -887,6 +892,10 @@ export class AppState {
 				// follows the file; the banner offers to write it again.
 				this.vaultDirty = false;
 				this.banner = "saveFailed";
+				// The file was replaced, so its version is now the one written
+				// (a KDBX 3.1 file is 4.1 now).
+				const info = await this.api.vault.databaseInfo().catch(() => null);
+				if (info && session === this.session) this.db = info;
 			} else {
 				this.banner = kind === "externalChange" ? "externalChange" : "saveFailed";
 			}

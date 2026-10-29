@@ -106,6 +106,15 @@ test.describe("tree and list keys", () => {
 		);
 	});
 
+	test("End with no selection goes to the last entry (M4A-R02)", async ({ page }) => {
+		const options = page.getByRole("listbox").getByRole("option");
+		const count = await options.count();
+		await options.first().focus();
+		await page.keyboard.press("End");
+		await expect(options.nth(count - 1)).toBeFocused();
+		await expect(options.nth(count - 1)).toHaveAttribute("aria-selected", "true");
+	});
+
 	test("arrows, Home, End and Enter in the list", async ({ page }) => {
 		const list = page.getByRole("listbox");
 		await expect(list).toHaveAccessibleName("All entries");

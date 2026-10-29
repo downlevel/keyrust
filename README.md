@@ -28,14 +28,15 @@ The screenshots show the built-in demo data.
   with Argon2id, calibrated to about one second on your computer.
 - Groups (nested) and entries with title, username, password, URL and notes; entry history; a
   recycle bin with restore.
-- Instant search over titles, usernames, URLs and notes (never passwords).
+- Instant search over titles, usernames and URLs (never passwords).
 - Password generator using the system's secure random source, with a strength estimate.
 - Copy to the clipboard from the Rust process, cleared automatically after a delay, on lock and on
   exit.
 - Auto-lock on inactivity, when the screen locks, when the computer sleeps, and optionally when
   the window is minimized.
-- Safe saving: atomic writes, and detection of changes made by another app (*Reload* or *Keep
-  mine*), so a sync client and Keyrust never silently overwrite each other.
+- Safe saving: atomic writes, and detection of changes made by another app before saving
+  (*Reload* or *Keep mine*). A write that lands in the instant between the last check and the
+  save cannot be detected ([details](SECURITY.md#what-keyrust-does-not-protect-against)).
 - Database settings: name, cipher, key-derivation parameters, recycle bin, master password.
 - Everything works from the keyboard, with a command palette (Ctrl+K) and a shortcuts panel.
 - Accessibility checked in CI: WCAG 2.1 AA contrast, visible focus, screen-reader roles and

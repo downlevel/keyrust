@@ -86,3 +86,25 @@ di ciascun test non erano raggiunti.
 - WebKitWebDriver restituisce testo vuoto per gli elementi `truncate`: lo smoke test legge `textContent`.
 - Run finale `ed7ebc2`: tutti i job verdi — core ×3, app ×3 (audit a11y su Linux), deny, fuzz, e2e (scenario
   completo e `keepassxc-cli show` sulla copia salvata con il titolo modificato; copia KDBX 3.1 identica).
+
+## Ispezione 1 — Codex codex-cli 0.165.0, `gpt-6.1-sol` (sessione 01a18748-6df9-7231-a1d5-e959f2e435e9) — **BLOCKED**
+- Result: `…/scratchpad/claudex/i1/claudex-9uicz0jh/result.json`. 29 s, nessuna lettura del repository: con la
+  0.165.0 il modello ha usato solo strumenti MCP e si è rifiutato di eseguire comandi di sola lettura (con la
+  0.164.0 le revisioni del piano ne eseguivano 4–12). Non conta come approvazione. L'utente ha scelto di
+  riprovare con effort alto.
+
+## Ispezione 2 — stesso CLI e modello, effort `high` (sessione 01a1874a-545f-7f51-8c08-f42261d1605c) — REVISE (5 medium, 2 low)
+- Result: `…/scratchpad/claudex/i2/claudex-649qo4vw/result.json`. 52 letture, 347 s, snapshot `2ef1eef`.
+- M4A-R01 (medium) salvataggio `notDurable` di un file 3.1: la UI non rileggeva la versione → ACCETTATO
+  (verificato): `databaseInfo` riletto in quel ramo; test per save e saveOverwrite.
+- M4A-R02 (medium) End senza selezione andava alla prima voce → ACCETTATO: Home/End assoluti; test di stato e
+  Playwright senza selezione.
+- M4A-R03 (medium) focus: X del toast 2,75:1 sul fondo scuro, campi di rinomina senza anello, overlay non
+  coperti → ACCETTATO: contorno chiaro sul toast, anello sui campi, test del focus esteso a toast, generatore,
+  scorciatoie, banner e campi; verificato che i nuovi casi falliscono senza le correzioni.
+- M4A-R04 (medium) due copie identiche annunciate una volta sola → ACCETTATO: un nodo nuovo per copia
+  (`toast.id`); test che il conto alla rovescia non cambia l'annuncio e una seconda copia sì.
+- M4A-R05 (medium) `SECURITY.md`, tabella degli asset in contraddizione col confine del webview → ACCETTATO.
+- M4A-R06 (low) README: la ricerca della UI non copre le note → ACCETTATO (affermazione corretta).
+- M4A-R07 (low) README: "never silently overwrite" troppo forte → ACCETTATO, con rimando alla corsa residua.
+- Verifica dopo le correzioni: Vitest 250, Playwright 54, check/lint/format verdi.
