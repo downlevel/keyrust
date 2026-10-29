@@ -127,3 +127,12 @@ di ciascun test non erano raggiunti.
 - M4A-R10 (medium) sotto 1100 px la sidebar compressa rimuove la regione `status` del salvataggio → VERIFICATO,
   ACCETTATO: la regione resta montata (`sr-only` se compressa); test Playwright a 900 px con axe.
 - Verifica: core 69 + 11 + 5 + 3 e fuzz_seeds verdi, clippy, fmt, `cargo deny`; UI check/lint/format, Vitest 250.
+
+## Ispezione 4 (mirata a `863c07b..5c20eca`) — stesso CLI e modello, effort `high` (sessione 01a1876a-23ab-7dd0-b9f5-a9de0b377561) — REVISE (1 medium)
+- Result: `…/scratchpad/claudex/i4/claudex-88h22rm9/result.json`. 50 letture, 219 s. Nessun rilievo su R09/R10.
+- M4A-R11 (medium) `HeaderHash` estratto con una ricerca testuale: `<HeaderHash >` o un commento potevano
+  saltare o falsare il controllo → ACCETTATO (difetto del codice nuovo di R08): lettura XML con `roxmltree`
+  (già nel lockfile, da dev-dependency a dipendenza), `KeePassFile/Meta/HeaderHash`, base64 di 32 byte
+  confrontati come byte; assente → accettato come in KeePassXC; duplicato o malformato → rifiutato; test per
+  spazi nel tag, CDATA, commenti, assenza, duplicati, base64 non valido, lunghezza errata.
+- Verifica: core 70 + 11 + 5 + 3, fuzz_seeds, clippy, fmt, `cargo deny` verdi.

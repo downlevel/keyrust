@@ -209,6 +209,54 @@ fn a_kdbx31_header_that_does_not_match_its_header_hash_is_refused() {
 }
 
 #[test]
+fn the_kdbx3_header_hash_is_read_as_xml() {
+    use base64::Engine as _;
+    let hash = [7u8; 32];
+    let b64 = base64::engine::general_purpose::STANDARD.encode(hash);
+    let doc = |meta: &str| format!("<KeePassFile><Meta>{meta}</Meta><Root/></KeePassFile>");
+    // Whitespace in the tag and around the value, CDATA, a comment beside it.
+    for meta in [
+        format!("<HeaderHash>{b64}</HeaderHash>"),
+        format!("<HeaderHash >\n  {b64}\n</HeaderHash >"),
+        format!("<HeaderHash><![CDATA[{b64}]]></HeaderHash>"),
+        format!("<!-- <HeaderHash>AAAA</HeaderHash> --><HeaderHash>{b64}</HeaderHash>"),
+    ] {
+        assert_eq!(
+            header_hash_from_xml(&doc(&meta)).expect(&meta),
+            Some(hash),
+            "{meta}"
+        );
+    }
+    // Absent: only a commented-out one, or none at all.
+    for meta in [
+        String::new(),
+        format!("<!-- <HeaderHash>{b64}</HeaderHash> -->"),
+    ] {
+        assert_eq!(
+            header_hash_from_xml(&doc(&meta)).expect(&meta),
+            None,
+            "{meta}"
+        );
+    }
+    // Duplicate, not base64, wrong length, outside Meta's structure.
+    for meta in [
+        format!("<HeaderHash>{b64}</HeaderHash><HeaderHash>{b64}</HeaderHash>"),
+        "<HeaderHash>not base64!</HeaderHash>".to_owned(),
+        "<HeaderHash>AAAA</HeaderHash>".to_owned(),
+    ] {
+        assert!(
+            matches!(
+                header_hash_from_xml(&doc(&meta)),
+                Err(VaultError::InvalidFormat)
+            ),
+            "{meta}"
+        );
+    }
+    assert!(header_hash_from_xml("<Other/>").is_err());
+    assert!(header_hash_from_xml("<KeePassFile><Meta/><Meta/></KeePassFile>").is_err());
+}
+
+#[test]
 fn the_reported_version_changes_only_when_the_file_is_replaced() {
     use crate::kdbx::limits::Limits;
     let (f, mut vault) = fixture_copy("keepassxc-kdbx31.kdbx");

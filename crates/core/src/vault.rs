@@ -111,31 +111,61 @@ fn parse(bytes: &[u8], password: &SecretString) -> Result<Database> {
 }
 
 fn check_kdbx3_header_hash(bytes: &[u8], password: &SecretString) -> Result<()> {
-    use base64::Engine as _;
     use sha2::{Digest, Sha256};
     let len = header::kdbx3_header_len(bytes).map_err(|_| VaultError::InvalidFormat)?;
-    // The decrypted XML holds field values: wiped when dropped.
+    // The decrypted XML holds field values: wiped when dropped, and read in
+    // place (no copy of the whole text).
     let xml = zeroize::Zeroizing::new(
         Database::get_xml(&mut &bytes[..], key(password)).map_err(map_open_error)?,
     );
-    // The first HeaderHash is the one in <Meta>, which comes first.
-    let text = String::from_utf8_lossy(&xml);
-    let Some(expected) = text
-        .split_once("<HeaderHash>")
-        .and_then(|(_, rest)| rest.split_once("</HeaderHash>"))
-        .map(|(value, _)| value.trim().to_owned())
-    else {
-        // KeePass before 2.20 did not write it (KeePassXC also accepts that);
-        // it cannot be removed without the key, being inside the encrypted part.
-        tracing::warn!("KDBX 3 file without HeaderHash: header not verified");
-        return Ok(());
-    };
-    let actual = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(&bytes[..len]));
-    if expected != actual {
-        tracing::warn!("database refused: KDBX 3 header does not match its HeaderHash");
+    let text = std::str::from_utf8(&xml).map_err(|_| VaultError::InvalidFormat)?;
+    match header_hash_from_xml(text)? {
+        Some(expected) if expected[..] == Sha256::digest(&bytes[..len])[..] => Ok(()),
+        Some(_) => {
+            tracing::warn!("database refused: KDBX 3 header does not match its HeaderHash");
+            Err(VaultError::InvalidFormat)
+        }
+        None => {
+            // KeePass before 2.20 did not write it (KeePassXC also accepts that);
+            // it cannot be removed without the key, being inside the encrypted part.
+            tracing::warn!("KDBX 3 file without HeaderHash: header not verified");
+            Ok(())
+        }
+    }
+}
+
+/// `KeePassFile/Meta/HeaderHash`, read as XML (whitespace in tags, comments,
+/// CDATA): `None` only when the element is absent. A duplicate element, or a
+/// value that is not the base64 of 32 bytes, makes the file invalid.
+fn header_hash_from_xml(xml: &str) -> Result<Option<[u8; 32]>> {
+    use base64::Engine as _;
+    let doc = roxmltree::Document::parse(xml).map_err(|_| VaultError::InvalidFormat)?;
+    let root = doc.root_element();
+    if !root.has_tag_name("KeePassFile") {
         return Err(VaultError::InvalidFormat);
     }
-    Ok(())
+    let mut metas = root.children().filter(|n| n.has_tag_name("Meta"));
+    let (Some(meta), None) = (metas.next(), metas.next()) else {
+        return Err(VaultError::InvalidFormat);
+    };
+    let mut hashes = meta.children().filter(|n| n.has_tag_name("HeaderHash"));
+    let hash = match (hashes.next(), hashes.next()) {
+        (None, _) => return Ok(None),
+        (Some(hash), None) => hash,
+        (Some(_), Some(_)) => return Err(VaultError::InvalidFormat),
+    };
+    let value: String = hash
+        .children()
+        .filter(|n| n.is_text())
+        .filter_map(|n| n.text())
+        .collect();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(value.trim())
+        .map_err(|_| VaultError::InvalidFormat)?;
+    decoded
+        .try_into()
+        .map(Some)
+        .map_err(|_| VaultError::InvalidFormat)
 }
 
 fn map_open_error(e: DatabaseOpenError) -> VaultError {

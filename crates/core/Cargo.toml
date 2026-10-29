@@ -21,6 +21,8 @@ serde_json = "1"
 sha2 = "0.10"
 # Already in the lockfile through keepass-rs: KDBX 3 HeaderHash comparison.
 base64 = "0.22"
+# Already in the lockfile (tests): reads the KDBX 3 HeaderHash as XML.
+roxmltree = "0.20"
 thiserror = "2"
 tracing = "0.1"
 uuid = { version = "1", features = ["serde"] }
@@ -33,7 +35,6 @@ arbitrary = { version = "1", features = ["derive"], optional = true }
 fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
-roxmltree = "0.20"
 tempfile = "3"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 uuid = "1"
