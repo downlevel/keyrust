@@ -122,6 +122,25 @@ reference for compatibility. The comparison below is as of KeePassXC 2.7.
 If you need any of the features Keyrust lacks, KeePassXC is the right choice, and your database
 works in both.
 
+## Download
+
+Installers are on the [Releases page](https://github.com/downlevel/keyrust/releases):
+
+| System | File |
+|---|---|
+| Windows 10 and 11 | `Keyrust_X.Y.Z_x64-setup.exe` (or the `.msi`, for managed deployment) |
+| macOS, Intel and Apple Silicon | `Keyrust_X.Y.Z_universal.dmg` |
+| Debian, Ubuntu and derivatives | `Keyrust_X.Y.Z_amd64.deb` |
+| Other Linux distributions (x86-64) | `Keyrust_X.Y.Z_amd64.AppImage` |
+
+Check your download as described in [Verifying releases](SECURITY.md#verifying-releases).
+
+The installers are not code-signed for Windows or macOS yet (the release notes say when they are).
+Windows SmartScreen shows *Windows protected your PC*: choose *More info* → *Run anyway*. macOS
+refuses to open the app the first time: open *System Settings → Privacy & Security* and choose
+*Open Anyway*. Some corporate computers do not allow unsigned software at all; there, build from
+source (below) or ask your administrator.
+
 ## Building
 
 Prerequisites for each OS are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). In short:
@@ -151,7 +170,8 @@ on Linux. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 - [Product requirements](docs/PRD.md) · [Architecture](docs/ARCHITECTURE.md) · [Design](docs/DESIGN.md)
   · [Accessibility](docs/ACCESSIBILITY.md)
-- [Roadmap](docs/TASKS.md) · [Development guide](docs/DEVELOPMENT.md) · [Contributing](CONTRIBUTING.md)
+- [Roadmap](docs/TASKS.md) · [Development guide](docs/DEVELOPMENT.md) · [Releasing](docs/RELEASING.md)
+  · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 - [Security policy and threat model](SECURITY.md)
 
 ## License

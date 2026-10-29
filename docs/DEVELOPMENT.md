@@ -11,9 +11,9 @@ crates/app/tests/       Tauri security configuration tests
 crates/app/             keyrust-app: Tauri 2 crate (tauri.conf.json, capabilities/, icons/)
 crates/app/ui/          SvelteKit (SPA) + Svelte 5 + TypeScript + Tailwind + shadcn-svelte
 tests/fixtures/         KeePassXC-created test databases (test data only)
-scripts/                helper scripts (fixture generation)
+scripts/                helper scripts (fixture generation, release checks)
 fuzz/                   cargo-fuzz targets (separate workspace, nightly)
-.github/workflows/      CI
+.github/workflows/      CI (ci.yml) and releases (release.yml)
 docs/                   PRD, architecture, design, roadmap, plans, spikes
 ```
 
@@ -26,7 +26,7 @@ without the Tauri system libraries. Build the app explicitly with `-p keyrust-ap
 | Tool | Version | Notes |
 |---|---|---|
 | Rust (rustup) | pinned by `rust-toolchain.toml` (1.99.1) | rustup installs it on first use |
-| Node.js | 22+ | |
+| Node.js | 24 (CI and releases use the exact version in `crates/app/ui/.node-version`) | |
 | pnpm | 12 (via `corepack enable pnpm`) | version pinned in `crates/app/ui/package.json` |
 | KeePassXC | 2.7+ | provides `keepassxc-cli` for the compatibility tests |
 | cargo-deny | latest | `cargo install cargo-deny --locked` |
@@ -146,6 +146,9 @@ an artifact, kept 7 days:
 Download it from the run page on GitHub (*Actions* → run → *Artifacts*). They are for testing only:
 Windows SmartScreen and macOS Gatekeeper will warn because they are not signed (on macOS:
 right click → Open).
+
+Releases are built by a separate workflow, `.github/workflows/release.yml`: see
+[RELEASING.md](RELEASING.md).
 
 ## Web preview
 

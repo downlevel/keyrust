@@ -15,6 +15,12 @@ const config = {
 		// The app has a single route and keeps its screen in state; hash routing
 		// makes it independent of the page URL (Tauri and the web preview alike).
 		router: { type: "hash" },
+		// SvelteKit writes the version name into _app/version.json, which Tauri embeds in
+		// the binary. Its default is the build time: release builds take the commit time
+		// instead, so two builds of one commit produce the same bytes.
+		...(process.env.SOURCE_DATE_EPOCH && {
+			version: { name: process.env.SOURCE_DATE_EPOCH },
+		}),
 	},
 };
 

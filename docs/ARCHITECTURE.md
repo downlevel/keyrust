@@ -180,13 +180,18 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
 
 ## Deploy
 - **Ambienti**: solo locale (`cargo tauri dev`) + release.
-- **Pipeline release** (su tag `v*`): matrice tre OS → `tauri build` → artefatti firmati → bozza GitHub Release
-  con checksum SHA-256 e firma (minisign/cosign) degli artefatti.
-- **Firma codice OS**: Windows (Authenticode) e macOS (Developer ID + notarizzazione) richiedono certificati a pagamento:
-  vedi Domande aperte.
-- **Build riproducibili**: `Cargo.lock` e `pnpm-lock.yaml` committati, toolchain fissata (`rust-toolchain.toml`),
-  `SOURCE_DATE_EPOCH`; obiettivo "best effort" documentato nel README.
-- **Segreti CI**: chiavi di firma come GitHub secrets, usate solo nel job di release.
+- **Pipeline release** (`.github/workflows/release.yml`, su tag `v*` di un commit di `main`): matrice tre OS →
+  `tauri build` (NSIS + MSI, deb + AppImage, dmg universale) → `SHA256SUMS` firmato con **cosign keyless** (identità
+  OIDC del workflow, log Rekor) → **bozza** di GitHub Release, pubblicata a mano. Ogni altro evento è un dry run
+  senza release. Procedura in [RELEASING.md](RELEASING.md), verifica per gli utenti in `SECURITY.md`.
+- **Firma codice OS**: **opzionale**, si attiva solo se esistono i secret dell'OS (Windows: Azure Trusted Signing
+  via `signCommand`; macOS: Developer ID + notarizzazione con chiave API). Senza secret gli installer escono non
+  firmati (macOS con firma ad hoc) e le note di release lo dichiarano.
+- **Build riproducibili** ("best effort"): toolchain, Node e pnpm fissati, lockfile con `--locked` /
+  `--frozen-lockfile`, `SOURCE_DATE_EPOCH` (anche come versione di SvelteKit), percorsi rimappati, nessuna cache;
+  il job `reproducibility` ricostruisce due volte il binario Linux e riporta l'esito nelle note, senza bloccare.
+- **Segreti CI**: solo i secret di firma codice, letti solo su push di tag e solo nello step di build che li usa;
+  cosign non ne richiede.
 
 ## Testing & osservabilità
 - **Unit test `core`**: generatore (distribuzione, vincoli), ricerca, gestione gruppi/voci, parametri KDF, errori.
@@ -210,8 +215,8 @@ per circa 1 s sulla macchina corrente. Cifratura AES-256 o ChaCha20 come previst
 ## Domande aperte
 - **Supporto KDBX4 in scrittura di keepass-rs**: verificare maturità del feature flag di salvataggio KDBX4 e la
   preservazione lossless di campi custom/allegati/cronologia; se insufficiente, contribuire upstream (bonus da portfolio).
-- **Firma codice Windows/macOS**: acquistare certificati (Apple Developer, Authenticode) o pubblicare in V1 solo
-  artefatti firmati con minisign/cosign + checksum? DA DEFINIRE.
+- ~~Firma codice Windows/macOS~~: decisa in Milestone 4b. Checksum firmati con cosign keyless sempre; firma codice OS
+  opzionale, attivata dai secret (nessun certificato acquistato per v0.1.0).
 - ~~Libreria i18n~~: decisa in Milestone 1, Paraglide JS 2.
 - ~~Conflitti di sync~~: decisa in Milestone 3, rilevamento e avviso (Reload / Keep mine), niente merge in V1.
 - ~~Package manager frontend~~: pnpm.
