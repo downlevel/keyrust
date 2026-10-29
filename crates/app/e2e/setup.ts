@@ -1,4 +1,11 @@
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -32,8 +39,22 @@ export function paths() {
  */
 export function prepare() {
 	const p = paths();
-	rmSync(p.root, { recursive: true, force: true });
+	// Only a folder this test created (it holds the marker) is ever deleted:
+	// KEYRUST_E2E_DIR pointing at anything else is refused.
+	const marker = join(p.root, ".keyrust-e2e");
+	if (existsSync(p.root)) {
+		if (!existsSync(marker) && readdirSync(p.root).length > 0) {
+			throw new Error(
+				`${p.root} exists and was not created by the e2e test: choose an empty or new KEYRUST_E2E_DIR`,
+			);
+		}
+		rmSync(p.root, { recursive: true, force: true });
+	}
 	mkdirSync(join(p.root, "vaults"), { recursive: true });
+	writeFileSync(
+		marker,
+		"Created by crates/app/e2e: deleted at the next run.\n",
+	);
 	mkdirSync(join(p.config, IDENTIFIER), { recursive: true });
 	mkdirSync(p.artifacts, { recursive: true });
 	copyFileSync(join(FIXTURES, "keepassxc-rich.kdbx"), p.rich);

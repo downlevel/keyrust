@@ -171,6 +171,43 @@ fn kdbx31_is_read_and_saved_as_kdbx4() {
     );
 }
 
+/// The KDBX 3.1 fixture with one byte of its protected stream key (outer
+/// header field 8) changed, as a sync provider could without the password.
+fn kdbx31_with_changed_stream_key() -> Vec<u8> {
+    let mut bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/keepassxc-kdbx31.kdbx"),
+    )
+    .expect("fixture");
+    let mut pos = 12;
+    loop {
+        let id = bytes[pos];
+        let len = usize::from(u16::from_le_bytes([bytes[pos + 1], bytes[pos + 2]]));
+        if id == 8 {
+            bytes[pos + 3] ^= 0x01;
+            return bytes;
+        }
+        assert_ne!(id, 0, "no protected stream key field");
+        pos += 3 + len;
+    }
+}
+
+#[test]
+fn a_kdbx31_header_that_does_not_match_its_header_hash_is_refused() {
+    let tampered = kdbx31_with_changed_stream_key();
+    // keepass-rs alone accepts it: protected values would decrypt to garbage.
+    assert!(Database::parse(&tampered, key(&secret(FIXTURE_PASSWORD))).is_ok());
+    assert!(matches!(
+        Vault::open_bytes(&tampered, secret(FIXTURE_PASSWORD)),
+        Err(VaultError::InvalidFormat)
+    ));
+
+    // Reload too: the file is replaced on disk by the tampered copy.
+    let (f, mut vault) = fixture_copy("keepassxc-kdbx31.kdbx");
+    std::fs::write(&f.path, &tampered).expect("tamper");
+    assert!(matches!(vault.reload(), Err(VaultError::InvalidFormat)));
+    assert_eq!(vault.info().version, (3, 1), "the vault is left as it was");
+}
+
 #[test]
 fn the_reported_version_changes_only_when_the_file_is_replaced() {
     use crate::kdbx::limits::Limits;

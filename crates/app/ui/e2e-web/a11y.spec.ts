@@ -131,3 +131,19 @@ test.describe("vault", () => {
 	// The KDBX 3.1 / 4.0 notice cannot appear in the demo (always 4.1); its
 	// tone is checked by the token contrast test and src/tests/version-notice.test.ts.
 });
+
+test.describe("narrow window (collapsed sidebar)", () => {
+	test.use({ viewport: { width: 900, height: 720 } });
+
+	test("saves are still announced, and the layout passes axe (M4A-R10)", async ({
+		page,
+	}, info) => {
+		await unlock(page);
+		await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+		const status = page.getByTestId("save-status");
+		await expect(status).toHaveAttribute("role", "status");
+		await page.keyboard.press("Control+s");
+		await expect(status).toHaveText("Saved");
+		await audit(page, info, "vault-narrow");
+	});
+});

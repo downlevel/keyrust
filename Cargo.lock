@@ -2365,6 +2365,7 @@ name = "keyrust-core"
 version = "0.0.1"
 dependencies = [
  "arbitrary",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.3.4",
  "keepass",

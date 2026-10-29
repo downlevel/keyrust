@@ -87,8 +87,11 @@ flowchart LR
   Argon2id with explicit parameters, never library defaults; the parameters can be changed in
   *Database settings*. KDBX 3.1 and 4.0 files open normally; the first save converts them to
   KDBX 4.1, and Keyrust says so with a notice when such a file is opened.
-- **Tampering.** KDBX4 authenticates the header and the payload with HMAC. A modified file is
-  rejected rather than silently opened.
+- **Tampering.** KDBX4 authenticates the header and the payload with HMAC. KDBX 3.1 has no header
+  HMAC: Keyrust compares the header with the `HeaderHash` stored in the encrypted part, which
+  keepass-rs does not check, so a changed header field is caught there too. A modified file is
+  rejected rather than silently opened. KDBX 3.1 files written by KeePass before 2.20 carry no
+  `HeaderHash` and are opened without that check, as KeePassXC does.
 - **Hostile files.** The key-derivation parameters are read before anything is authenticated,
   so a tampered file could ask for any amount of memory or time. Keyrust checks them before
   deriving the key and refuses files beyond Argon2 2 GiB of memory, 1000 iterations or 256 lanes,

@@ -97,6 +97,47 @@ fn check_limits(bytes: &[u8], limits: &Limits) -> Result<()> {
     })
 }
 
+/// Parses a database. For KDBX 3.1 it also checks the `HeaderHash` that
+/// keepass-rs 0.17 ignores: a KDBX 3 outer header has no HMAC, so without it
+/// a changed field (the protected stream key, field 8) would go unnoticed and
+/// protected values would decrypt to garbage that the next save makes
+/// permanent. KDBX 4 authenticates its header itself.
+fn parse(bytes: &[u8], password: &SecretString) -> Result<Database> {
+    let db = Database::parse(bytes, key(password)).map_err(map_open_error)?;
+    if matches!(db.config.version, DatabaseVersion::KDB3(_)) {
+        check_kdbx3_header_hash(bytes, password)?;
+    }
+    Ok(db)
+}
+
+fn check_kdbx3_header_hash(bytes: &[u8], password: &SecretString) -> Result<()> {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    let len = header::kdbx3_header_len(bytes).map_err(|_| VaultError::InvalidFormat)?;
+    // The decrypted XML holds field values: wiped when dropped.
+    let xml = zeroize::Zeroizing::new(
+        Database::get_xml(&mut &bytes[..], key(password)).map_err(map_open_error)?,
+    );
+    // The first HeaderHash is the one in <Meta>, which comes first.
+    let text = String::from_utf8_lossy(&xml);
+    let Some(expected) = text
+        .split_once("<HeaderHash>")
+        .and_then(|(_, rest)| rest.split_once("</HeaderHash>"))
+        .map(|(value, _)| value.trim().to_owned())
+    else {
+        // KeePass before 2.20 did not write it (KeePassXC also accepts that);
+        // it cannot be removed without the key, being inside the encrypted part.
+        tracing::warn!("KDBX 3 file without HeaderHash: header not verified");
+        return Ok(());
+    };
+    let actual = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(&bytes[..len]));
+    if expected != actual {
+        tracing::warn!("database refused: KDBX 3 header does not match its HeaderHash");
+        return Err(VaultError::InvalidFormat);
+    }
+    Ok(())
+}
+
 fn map_open_error(e: DatabaseOpenError) -> VaultError {
     match e {
         DatabaseOpenError::Key(DatabaseKeyError::IncorrectKey | DatabaseKeyError::EmptyKey) => {
@@ -220,7 +261,7 @@ impl Vault {
     ) -> Result<Self> {
         check_limits(bytes, limits)?;
         check_version(bytes)?;
-        let db = Database::parse(bytes, key(&password)).map_err(map_open_error)?;
+        let db = parse(bytes, &password)?;
         Ok(Self {
             db,
             path: None,
@@ -368,7 +409,7 @@ impl Vault {
             .ok_or(VaultError::TooExpensive)?;
         check_limits(&bytes, &Limits::DEFAULT)?;
         check_version(&bytes)?;
-        let db = Database::parse(&bytes, key(&self.committed)).map_err(map_open_error)?;
+        let db = parse(&bytes, &self.committed)?;
         self.db = db;
         self.stamp = Some(Stamp::of(&bytes));
         self.pending = None;

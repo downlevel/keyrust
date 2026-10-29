@@ -163,13 +163,12 @@
 				<SlidersHorizontal class="size-4" aria-hidden="true" />
 				{#if !collapsed}{m.settings_button()}{/if}
 			</button>
-			{#if !collapsed}
-				<span
-					class="ml-auto pr-1 text-xs text-muted-foreground"
-					role="status"
-					data-testid="save-status">{status}</span
-				>
-			{/if}
+			<!-- Always mounted: the collapsed sidebar still announces saves. -->
+			<span
+				class={collapsed ? "sr-only" : "ml-auto pr-1 text-xs text-muted-foreground"}
+				role="status"
+				data-testid="save-status">{status}</span
+			>
 		</div>
 	</nav>
 

@@ -237,6 +237,17 @@ pub fn peek(data: &[u8]) -> Result<HeaderSummary, HeaderError> {
 /// compression (3) and inner stream id (10) are exactly 4 bytes, the rounds
 /// (6) exactly 8; the header must end (id 0) within [`MAX_HEADER_LEN`].
 pub fn kdbx3_transform_rounds(data: &[u8]) -> Result<u64, HeaderError> {
+    kdbx3_header(data).map(|(rounds, _)| rounds)
+}
+
+/// Length in bytes of a KDBX 3 outer header, end field included: the bytes
+/// its `HeaderHash` covers. Validated like [`kdbx3_transform_rounds`].
+pub fn kdbx3_header_len(data: &[u8]) -> Result<usize, HeaderError> {
+    kdbx3_header(data).map(|(_, len)| len)
+}
+
+/// Transform rounds and header length of a KDBX 3 file.
+fn kdbx3_header(data: &[u8]) -> Result<(u64, usize), HeaderError> {
     const FIELD_COMMENT: u8 = 1;
     const FIELD_TRANSFORM_ROUNDS: u8 = 6;
     const FIELD_INNER_STREAM: u8 = 10;
@@ -279,7 +290,11 @@ pub fn kdbx3_transform_rounds(data: &[u8]) -> Result<u64, HeaderError> {
             _ => return Err(HeaderError::InvalidField("unknown KDBX 3 field")),
         }
     }
-    rounds.ok_or(HeaderError::MissingField("transform rounds"))
+    let len = data.len().min(MAX_HEADER_LEN) - r.data.len();
+    Ok((
+        rounds.ok_or(HeaderError::MissingField("transform rounds"))?,
+        len,
+    ))
 }
 
 /// Value of a KeePass `VariantDictionary` item. Every type of the format is

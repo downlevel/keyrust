@@ -116,8 +116,14 @@ di ciascun test non erano raggiunti.
   (`ProtectedStreamKey`) alterato da un provider di sync rende illeggibili le password protette senza errore,
   e il primo salvataggio lo rende permanente in 4.1 → VERIFICATO nel sorgente (`format/kdbx3.rs`: nessun
   controllo; il lettore KDBX4 lo fa). Correzione possibile nel core via `Database::get_xml` + SHA-256
-  dell'intestazione. Disposizione: in attesa della decisione dell'utente.
-- M4A-R09 (medium) `setup.ts` cancella ricorsivamente `KEYRUST_E2E_DIR` senza controlli → VERIFICATO.
-  Disposizione: in attesa.
-- M4A-R10 (medium) sotto 1100 px la sidebar compressa rimuove la regione `status` del salvataggio → VERIFICATO.
-  Disposizione: in attesa.
+  dell'intestazione. Disposizione (utente: correggere nella 4a): ACCETTATO. `Vault` verifica `HeaderHash`
+  dei KDBX 3 in `open` e `reload` (`Database::get_xml`, XML azzerato dopo l'uso; senza `HeaderHash`, KeePass
+  < 2.20, si apre come in KeePassXC); test con il campo 8 alterato: keepass-rs lo accetta, Keyrust lo
+  rifiuta (`InvalidFormat`) e `reload` lascia il vault com'era. Costo: la chiave dei soli file 3.1 è
+  derivata due volte all'apertura. SECURITY.md aggiornato.
+- M4A-R09 (medium) `setup.ts` cancella ricorsivamente `KEYRUST_E2E_DIR` senza controlli → VERIFICATO,
+  ACCETTATO: si cancella solo una cartella con il marcatore `.keyrust-e2e` (o vuota); provato in locale che
+  una cartella estranea è rifiutata e resta intatta.
+- M4A-R10 (medium) sotto 1100 px la sidebar compressa rimuove la regione `status` del salvataggio → VERIFICATO,
+  ACCETTATO: la regione resta montata (`sr-only` se compressa); test Playwright a 900 px con axe.
+- Verifica: core 69 + 11 + 5 + 3 e fuzz_seeds verdi, clippy, fmt, `cargo deny`; UI check/lint/format, Vitest 250.
