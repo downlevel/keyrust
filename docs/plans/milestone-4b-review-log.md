@@ -43,3 +43,7 @@
 - Un primo avvio (`/tmp/claude-0/-opt-apps-password-manager/396c1774-6943-4819-a44e-4e13330ae930/scratchpad/claudex/i1`) con `--host codex` errato è stato interrotto dall'host prima del risultato (record rimasto `running`); non conta come ispezione.
 - Result: `/tmp/claude-0/-opt-apps-password-manager/396c1774-6943-4819-a44e-4e13330ae930/scratchpad/claudex/i1b/claudex-jqwl7p0u/result.json`
 - M4B-I01 (medium) `SHA256SUMS` scritto nella cartella espansa da `sha256sum -- *`: una corsa può includerlo con l'hash del file vuoto e far fallire `sha256sum -c` → ACCETTATO: manifesto scritto in `$RUNNER_TEMP` e spostato in `dist` dopo; actionlint e simulazione dello step verdi.
+
+## Ispezione 2 — Codex, sessione nuova 01a18823-6d4d-79e1-9761-211499970e7e — **APPROVED**, 0 findings — snapshot `7d41d12`
+- Result: `/tmp/claude-0/-opt-apps-password-manager/396c1774-6943-4819-a44e-4e13330ae930/scratchpad/claudex/i2/claudex-2xklbt_v/result.json`
+- Limiti dichiarati: revisione statica; installer, riproducibilità, firma OIDC e firma con certificati non verificati; impostazioni GitHub e mapping SHA→release delle action non verificati. Il dry run sulla PR resta la prova pendente.
