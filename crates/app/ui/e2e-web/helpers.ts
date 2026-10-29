@@ -32,6 +32,8 @@ const IMPACT_FAILS = new Set(["serious", "critical"]);
  * be fixed or justified in docs/ACCESSIBILITY.md.
  */
 export async function audit(page: Page, testInfo: TestInfo, state: string) {
+	// The steady state is audited, not a colour half-way through a transition.
+	await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
 	const results = await new AxeBuilder({ page })
 		.withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
 		.analyze();

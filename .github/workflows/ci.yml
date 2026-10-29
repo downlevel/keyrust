@@ -229,7 +229,15 @@ jobs:
               "/Work/Dev/GitHub (e2e)" | tee "$RUNNER_TEMP/title.txt"
           test "$(cat "$RUNNER_TEMP/title.txt")" = "GitHub (e2e)"
           cmp "$KEYRUST_E2E_DIR/vaults/keepassxc-kdbx31.kdbx" tests/fixtures/keepassxc-kdbx31.kdbx
-      # The logs carry no field values (logging policy); the fixture password is public.
+      # Job logs need a login to read; annotations are public. The logs carry no
+      # field values (logging policy) and the fixture password is public.
+      - name: Report the end of the log as an annotation
+        if: failure()
+        run: |
+          if [ -f "$RUNNER_TEMP/e2e.log" ]; then
+            tail -n 150 "$RUNNER_TEMP/e2e.log" | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' |
+              python3 -c "import sys; print('::error title=e2e log (last 150 lines)::' + sys.stdin.read().replace('%','%25').replace('\r','').replace('\n','%0A'))"
+          fi
       - name: Upload logs and screenshots
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

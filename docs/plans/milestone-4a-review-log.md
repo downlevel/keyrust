@@ -24,3 +24,48 @@
 ## Round 3 — stessa sessione — **APPROVED**, 0 findings — plan sha256 0ff713d9…67b
 - Result: `/tmp/claude-0/-opt-apps-password-manager/ed4fe123-bb03-4dee-b36b-94caf3d40ad8/scratchpad/claudex/r3/claudex-u5ikznlh/result.json`. Limiti dichiarati: approvazione del piano, non dell'implementazione; revisione statica; browser,
   accessibilità desktop e CI non verificati.
+
+## Build — Claude (builder), base `6229bfe`
+- Autorizzazione: l'utente ha confermato l'implementazione il 2026-10-29. Approvazione del piano verificata
+  (`runner.py check`): sha256 `0ff713d9…67b` invariato.
+- Commit: `2fc628e` (core), `6a5e1a4` (UI, audit), `aad5931` (e2e, screenshot, CI), `3674b65` (documenti).
+  Autore di tutto il codice: Claude. Codex non ha scritto codice.
+
+### Baseline dell'audit (prima delle correzioni, `pnpm test:web a11y`)
+Prima esecuzione: 7 test su 14 falliti, nessuna violazione moderate/minor; gli stati dopo il primo errore
+di ciascun test non erano raggiunti.
+- `color-contrast` (serious): `muted-foreground` (zinc-500) sulla riga selezionata (`selection`, 4,32:1) —
+  vault-entry, editor-edit, confirm; bottone primario in hover `primary/80` (4,39:1) — unlock-wrong-password.
+- `aria-required-attr` (critical): combobox del palette senza `aria-controls`.
+- `scrollable-region-focusable` (serious): lista del palette.
+- `aria-required-children` (critical): `listbox` vuoto (gruppo senza voci).
+- Test dei token (Vitest): 9 coppie sotto soglia (muted-foreground su muted/accent/selection; bordi degli
+  input 1,5:1; strength-2/3 sotto 3:1).
+- Test del focus: anelli al 20–50 % di alfa su input, bottoni, switch; palette senza anello (`shadow-none!`
+  e `has-[data-slot=input-group-control]` mai vero). Tastiera: Home/End assenti nella lista.
+
+### Deviazioni dal piano (motivate)
+- Ordine di tab: il DOM segue la lettura sidebar → ricerca → lista → dettaglio (come DESIGN.md). Il test
+  parte dalla ricerca e verifica ricerca → lista → dettaglio → (giro) albero, una tappa ciascuno, e
+  Shift+Tab esattamente inverso.
+- Create non ha passi: un solo modulo; coperti stato iniziale, avanzate aperte, conferma diversa.
+- Banner di versione non raggiungibile nella demo (sempre 4.1): coperto da `version-notice.test.ts`.
+- Il campo di ricerca usa la classe `border-input` invece di `border-border` (è un campo, non un divisore):
+  cambio di classe, non di token.
+- Focus: il test attende la fine delle transizioni (`document.getAnimations()`) invece di emulare reduced
+  motion, che lascia comunque transizioni di 0,01 ms.
+- Screenshot: la password generata è mascherata (`mask`), per la regola "nessuna password in chiaro".
+- e2e: WebdriverIO 9.32 (la 10 ha tre settimane, la guida Tauri usa la 9), tauri-driver 2.1.0 (la 3 è
+  alpha); salvataggio tramite il pulsante Save dell'editor, che scrive il file.
+- In più rispetto al piano: Home/End nella lista, ruolo `dialog` del popover del generatore, verifica in CI
+  che la copia KDBX 3.1 resti identica (nessun salvataggio).
+
+### Verifica locale
+- `cargo test -p keyrust-core` verde (68 + 11 + 5 + 3), clippy `-D warnings` e fmt puliti.
+- UI: `pnpm check` (incluso `tsc -p e2e-web`), `lint`, `format:check`, `pnpm test` 246 test verdi.
+- `pnpm test:web`: 49 test verdi, 0 violazioni axe di qualsiasi impatto.
+- `pnpm screenshots`: 4 PNG da 89–219 KB a scala 2, controllati a occhio.
+- e2e: `pnpm --dir crates/app/e2e check` verde; preparazione dati eseguita in locale (copie identiche,
+  `settings.json` nel percorso XDG atteso). Lo scenario gira solo in CI.
+- Link relativi di README, SECURITY e documenti: nessuno rotto.
+- `keyrust-app` (Rust) non modificato: clippy Windows con il finto `llvm-rc` non necessario.
