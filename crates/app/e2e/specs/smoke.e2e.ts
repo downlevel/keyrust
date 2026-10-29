@@ -55,6 +55,22 @@ async function optionTitles(): Promise<string[]> {
 	);
 }
 
+/**
+ * Waits for an element's text. Read from the DOM: WebKitWebDriver's "Get
+ * Element Text" returns "" for `truncate` (overflow hidden) elements.
+ */
+async function expectText(selector: string, expected: string) {
+	const read = () =>
+		browser.execute(
+			(sel: string) =>
+				document.querySelector(sel)?.textContent?.trim() ?? null,
+			selector,
+		);
+	await browser.waitUntil(async () => (await read()) === expected, {
+		timeoutMsg: `${selector}: expected "${expected}", found "${await read()}"`,
+	});
+}
+
 function option(title: string) {
 	return $(
 		`//*[@role="listbox"]//*[@role="option"][.//span[normalize-space()="${title}"]]`,
@@ -92,9 +108,7 @@ describe("Keyrust smoke test", () => {
 		expect(await count()).toBe(2);
 		await expect(await recentButton("keepassxc-rich")).toBeDisplayed();
 		await expect(await recentButton("keepassxc-kdbx31")).toBeDisplayed();
-		await expect($('[data-testid="unlock-db-name"]')).toHaveText(
-			"keepassxc-rich",
-		);
+		await expectText('[data-testid="unlock-db-name"]', "keepassxc-rich");
 	});
 
 	it("refuses a wrong password and keeps the focus in the field", async () => {
@@ -118,9 +132,7 @@ describe("Keyrust smoke test", () => {
 
 		await option("GitHub").click();
 		await $("#entry-title").waitForDisplayed();
-		await expect($('[data-testid="password-value"]')).toHaveText(
-			"••••••••••••",
-		);
+		await expectText('[data-testid="password-value"]', "••••••••••••");
 		expect(await secretsInDom()).toEqual([]);
 	});
 
@@ -145,7 +157,7 @@ describe("Keyrust smoke test", () => {
 		await title.clearValue();
 		await title.setValue(NEW_TITLE);
 		await $('form button[type="submit"]').click();
-		await expect($("#entry-title")).toHaveText(NEW_TITLE);
+		await expectText("#entry-title", NEW_TITLE);
 		await browser.waitUntil(
 			async () =>
 				(await $('[data-testid="save-status"]').getText()) ===
@@ -163,9 +175,7 @@ describe("Keyrust smoke test", () => {
 
 	it("opens a KDBX 3.1 file with the conversion notice, without saving", async () => {
 		await (await recentButton("keepassxc-kdbx31")).click();
-		await expect($('[data-testid="unlock-db-name"]')).toHaveText(
-			"keepassxc-kdbx31",
-		);
+		await expectText('[data-testid="unlock-db-name"]', "keepassxc-kdbx31");
 		await unlockWith(FIXTURE_PASSWORD);
 		const notice = await $(
 			'//*[@role="status"][contains(., "This database uses KDBX 3.1")]',
