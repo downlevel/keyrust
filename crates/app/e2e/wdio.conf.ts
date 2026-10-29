@@ -73,6 +73,7 @@ export const config: WebdriverIO.Config = {
 			const state = await browser
 				.execute(() => ({
 					url: location.href,
+					pathname: location.pathname,
 					readyState: document.readyState,
 					tauri: "__TAURI_INTERNALS__" in window,
 					errors:
@@ -97,9 +98,9 @@ export const config: WebdriverIO.Config = {
 					const source = [...document.scripts]
 						.map((s) => s.textContent ?? "")
 						.join("\n");
-					const imports = [...source.matchAll(/import\("([^"]+)"\)/g)].map(
-						(m) => m[1],
-					);
+					const imports = [
+						...source.matchAll(/import\("([^"]+)"\)/g),
+					].map((m) => m[1]);
 					const results: string[] = [];
 					for (const url of imports) {
 						try {
@@ -116,7 +117,9 @@ export const config: WebdriverIO.Config = {
 					};
 				})
 				.catch((e: unknown) => ({ error: String(e) }));
-			console.log(`page boot after "${test.title}": ${JSON.stringify(boot)}`);
+			console.log(
+				`page boot after "${test.title}": ${JSON.stringify(boot)}`,
+			);
 			const name = test.title.replace(/[^\w-]+/g, "_");
 			await browser.saveScreenshot(
 				join(paths().artifacts, `${name}.png`),
