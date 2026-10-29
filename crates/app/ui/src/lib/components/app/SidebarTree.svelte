@@ -32,6 +32,30 @@
 	});
 	const all = $derived(bin ? [...rows, bin] : rows);
 
+	/**
+	 * Position among siblings: the rows are flat in the DOM, so the tree
+	 * structure is given by aria-level, aria-setsize and aria-posinset.
+	 */
+	const positions = $derived.by(() => {
+		const parents = all.map((row, i) => {
+			for (let j = i - 1; j >= 0; j--) if (all[j].depth < row.depth) return j;
+			return -1;
+		});
+		const out: Record<string, { posinset: number; setsize: number }> = {};
+		all.forEach((row, i) => {
+			const siblings = all.filter(
+				(r, j) => parents[j] === parents[i] && r.depth === row.depth,
+			);
+			out[row.id] = { posinset: siblings.indexOf(row) + 1, setsize: siblings.length };
+		});
+		return out;
+	});
+
+	const accessibleName = (row: Row) =>
+		row.count === 1
+			? m.group_with_count_one({ name: row.name })
+			: m.group_with_count_many({ name: row.name, count: String(row.count) });
+
 	let tree = $state<HTMLElement | null>(null);
 	let newName = $state("");
 
@@ -85,6 +109,9 @@
 			role="treeitem"
 			aria-selected={selected}
 			aria-level={row.depth + 1}
+			aria-posinset={positions[row.id]?.posinset}
+			aria-setsize={positions[row.id]?.setsize}
+			aria-label={accessibleName(row)}
 			tabindex={selected ? 0 : -1}
 			data-group-id={row.id}
 			title={collapsed ? row.name : undefined}
@@ -104,8 +131,6 @@
 			{#if !collapsed}
 				<span class="min-w-0 flex-1 truncate">{row.name}</span>
 				<span class="text-xs font-normal text-muted-foreground">{row.count}</span>
-			{:else}
-				<span class="sr-only">{row.name}</span>
 			{/if}
 		</button>
 	{/if}

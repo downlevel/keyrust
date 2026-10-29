@@ -45,7 +45,7 @@
 
 <div class="flex flex-col gap-1.5">
 	<div
-		class="flex items-center rounded-lg border bg-background pr-1 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20 {invalid
+		class="flex items-center rounded-lg border bg-background pr-1 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring {invalid
 			? 'border-destructive'
 			: 'border-input'} {disabled ? 'opacity-60' : ''}"
 	>
@@ -71,7 +71,7 @@
 		<button
 			type="button"
 			class="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-			aria-label={visible ? m.hide_password() : m.show_password()}
+			aria-label={m.show_password()}
 			aria-pressed={visible}
 			{disabled}
 			onclick={() => (visible = !visible)}

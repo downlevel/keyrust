@@ -79,9 +79,9 @@
 	}
 
 	const input =
-		"h-[38px] rounded-lg border border-input bg-background px-3 outline-none focus:border-ring focus:ring-3 focus:ring-ring/20";
+		"h-[38px] rounded-lg border border-input bg-background px-3 outline-none focus:border-ring focus:ring-2 focus:ring-ring";
 	const small =
-		"h-[34px] rounded-lg border border-input bg-background px-2 outline-none focus:border-ring focus:ring-3 focus:ring-ring/20";
+		"h-[34px] rounded-lg border border-input bg-background px-2 outline-none focus:border-ring focus:ring-2 focus:ring-ring";
 </script>
 
 <main class="flex flex-1 items-start justify-center overflow-y-auto p-8">
@@ -127,7 +127,12 @@
 				<label for="create-name" class="text-[13px] font-medium"
 					>{m.create_name_label()}</label
 				>
-				<input id="create-name" class={input} bind:value={name} />
+				<input
+					id="create-name"
+					class={input}
+					bind:value={name}
+					aria-describedby={app.createError ? "create-error" : undefined}
+				/>
 			</div>
 			<div class="flex flex-col gap-1.5">
 				<label for="create-password" class="text-[13px] font-medium"
@@ -137,9 +142,11 @@
 					id="create-password"
 					bind:value={password}
 					autocomplete="new-password"
-					describedby="create-password-hint"
+					describedby={app.createError
+						? "create-password-strength create-password-hint create-error"
+						: "create-password-strength create-password-hint"}
 				/>
-				<StrengthMeter estimate={strength} />
+				<StrengthMeter estimate={strength} id="create-password-strength" />
 				<span id="create-password-hint" class="text-xs text-muted-foreground"
 					>{m.create_password_hint()}</span
 				>
@@ -252,7 +259,9 @@
 				{/if}
 			</div>
 			{#if app.createError}
-				<p class="text-[13px] text-destructive" role="alert">{m.create_error()}</p>
+				<p id="create-error" class="text-[13px] text-destructive" role="alert">
+					{m.create_error()}
+				</p>
 			{/if}
 		</div>
 

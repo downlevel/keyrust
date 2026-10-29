@@ -91,6 +91,7 @@
 				<Wordmark subtitle={m.unlock_subtitle()} />
 				{#if noticeText}
 					<p
+						id="lock-notice"
 						role="status"
 						data-testid="lock-notice"
 						class="rounded-lg border border-border bg-muted px-3 py-2.5 text-[13px] text-muted-foreground"
@@ -118,12 +119,14 @@
 						placeholder={m.unlock_placeholder()}
 						disabled={unlocking}
 						invalid={!!errorText}
-						describedby="master-password-error"
+						describedby={noticeText
+							? "lock-notice master-password-error"
+							: "master-password-error"}
 						autofocus
 					/>
 					<div
 						id="master-password-error"
-						aria-live="polite"
+						role="alert"
 						class="min-h-5 text-[13px] text-destructive"
 					>
 						{errorText}

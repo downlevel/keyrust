@@ -123,8 +123,10 @@ export class AppState {
 	/** An editor save is in flight: the form and navigation wait for it. */
 	savingEntry = $state(false);
 
-	toast = $state<{ field: Field; secs: number } | null>(null);
+	toast = $state<{ field: Field; secs: number; total: number } | null>(null);
 	banner = $state<"externalChange" | "saveFailed" | null>(null);
+	/** The KDBX 3.1 / 4.0 conversion notice was dismissed for this session. */
+	versionNoticeDismissed = $state(false);
 	saveState = $state<"saved" | "saving" | "failed">("saved");
 	/**
 	 * The vault has changes that are not in the file: set by every change,
@@ -184,6 +186,18 @@ export class AppState {
 	}
 
 	// ---------------------------------------------------------------- derived
+
+	/**
+	 * The open file is older than KDBX 4.1, which every save writes. Gone once
+	 * a save replaced the file (the backend then reports 4.1) or on Dismiss;
+	 * back at the next unlock of a file that was never saved.
+	 */
+	readonly versionNotice: string | null = $derived.by(() => {
+		const version = this.db?.version;
+		if (!version || this.versionNoticeDismissed) return null;
+		const [major, minor] = version;
+		return major < 4 || (major === 4 && minor < 1) ? `${major}.${minor}` : null;
+	});
 
 	readonly groups: FlatGroup[] = $derived.by(() => {
 		const out: FlatGroup[] = [];
@@ -414,6 +428,7 @@ export class AppState {
 		this.revealed = null;
 		this.editor = null;
 		this.banner = null;
+		this.versionNoticeDismissed = false;
 		this.saveState = "saved";
 		this.screen = "vault";
 	}
@@ -613,7 +628,8 @@ export class AppState {
 			return;
 		}
 		if (session !== this.session) return;
-		this.toast = { field, secs: secs ?? this.settings.clipboard_clear_secs };
+		const total = secs ?? this.settings.clipboard_clear_secs;
+		this.toast = { field, secs: total, total };
 		this.startToastTimer();
 	}
 

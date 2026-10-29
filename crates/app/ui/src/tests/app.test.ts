@@ -21,12 +21,12 @@ async function unlock(user: ReturnType<typeof userEvent.setup>, password = "secr
 async function openVault() {
 	const ctx = setup();
 	await unlock(ctx.user);
-	await screen.findByRole("listbox", { name: "Entries" });
+	await screen.findByRole("listbox", { name: /entries/i });
 	return ctx;
 }
 
 const option = (name: RegExp | string) =>
-	within(screen.getByRole("listbox", { name: "Entries" })).getByRole("option", { name });
+	within(screen.getByRole("listbox", { name: /entries/i })).getByRole("option", { name });
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -288,7 +288,7 @@ describe("database settings (milestone 3b)", () => {
 		const user = userEvent.setup();
 		render(App, { apis: { vault, app: new MemoryAppApi() } });
 		await unlock(user);
-		await screen.findByRole("listbox", { name: "Entries" });
+		await screen.findByRole("listbox", { name: /entries/i });
 		await user.keyboard("{Control>}k{/Control}");
 		await user.type(await screen.findByRole("combobox"), "Database Settings");
 		await user.keyboard("{Enter}");
@@ -337,7 +337,7 @@ describe("master password fields (M3B-R03)", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 		await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
 		await unlock(user);
-		await screen.findByRole("listbox", { name: "Entries" });
+		await screen.findByRole("listbox", { name: /entries/i });
 		await user.keyboard("{Control>}k{/Control}");
 		await user.type(await screen.findByRole("combobox"), "Database Settings");
 		await user.keyboard("{Enter}");

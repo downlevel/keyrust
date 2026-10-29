@@ -123,7 +123,7 @@
 	}
 
 	const input =
-		"h-[34px] rounded-lg border border-input bg-background px-2 outline-none focus:border-ring focus:ring-3 focus:ring-ring/20";
+		"h-[34px] rounded-lg border border-input bg-background px-2 outline-none focus:border-ring focus:ring-2 focus:ring-ring";
 	const heading = "text-xs font-semibold tracking-wider text-muted-foreground uppercase";
 	const row =
 		"flex items-center justify-between gap-4 border-b border-muted py-2.5 last:border-b-0";
@@ -463,8 +463,13 @@
 				<label for="new-master" class="text-[13px] font-medium"
 					>{m.master_password_new()}</label
 				>
-				<SecretInput id="new-master" bind:value={newPassword} autocomplete="new-password" />
-				<StrengthMeter estimate={newStrength} />
+				<SecretInput
+					id="new-master"
+					bind:value={newPassword}
+					autocomplete="new-password"
+					describedby="new-master-strength"
+				/>
+				<StrengthMeter estimate={newStrength} id="new-master-strength" />
 			</div>
 			<div class="flex flex-col gap-1.5">
 				<label for="confirm-master" class="text-[13px] font-medium"

@@ -88,6 +88,11 @@
 	"search_placeholder": "Search",
 	"search_clear": "Clear search",
 	"entries_label": "Entries",
+	"entries_in_group": "Entries in {group}",
+	"entries_matching": "Entries matching “{query}”",
+	"group_with_count_one": "{name}, 1 entry",
+	"group_with_count_many": "{name}, {count} entries",
+	"search_results_none": "No matches",
 	"entry_count_one": "1 entry",
 	"entry_count_many": "{count} entries",
 	"new_entry": "New entry",
@@ -147,6 +152,7 @@
 	"dialog_close": "Close",
 
 	"toast_copied": "{field} copied · clears in {secs}s",
+	"toast_copied_announcement": "{field} copied. The clipboard clears in {secs} seconds.",
 	"toast_dismiss": "Dismiss",
 
 	"banner_external": "This database was changed by another app.",
@@ -155,6 +161,8 @@
 	"banner_save_failed": "Couldn’t save the database. The folder is read-only or the disk is full. Your changes are kept.",
 	"banner_retry": "Retry",
 	"banner_save_as": "Save as…",
+	"banner_version": "This database uses KDBX {version}. Saving converts it to KDBX 4.1, which very old KeePass clients cannot open.",
+	"banner_dismiss": "Dismiss",
 
 	"confirm_cancel": "Cancel",
 	"confirm_delete_entry_title": "Move “{title}” to the Recycle Bin?",

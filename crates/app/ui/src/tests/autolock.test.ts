@@ -21,7 +21,7 @@ async function openVault() {
 	render(App, { apis: { vault: new DemoVault({ delayMs: 0 }), app: new MemoryAppApi() } });
 	await user.type(await screen.findByLabelText("Master password"), "secret");
 	await user.click(screen.getByRole("button", { name: "Unlock" }));
-	await screen.findByRole("listbox", { name: "Entries" });
+	await screen.findByRole("listbox", { name: /entries/i });
 	await vi.waitFor(() => expect(handlers.has("locked")).toBe(true));
 }
 
@@ -35,7 +35,7 @@ describe("the locked event", () => {
 		await openVault();
 		handlers.get("locked")?.({ payload: { reason } });
 		expect(await screen.findByTestId("lock-notice")).toHaveTextContent(text);
-		expect(screen.queryByRole("listbox", { name: "Entries" })).toBeNull();
+		expect(screen.queryByRole("listbox", { name: /entries/i })).toBeNull();
 		expect(screen.getByLabelText("Master password")).toHaveValue("");
 	});
 });

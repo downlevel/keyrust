@@ -139,9 +139,7 @@
 					<button
 						type="button"
 						class={iconButton}
-						aria-label={app.revealed === null
-							? m.reveal_password()
-							: m.conceal_password()}
+						aria-label={m.reveal_password()}
 						aria-pressed={app.revealed !== null}
 						title={app.revealed === null ? m.reveal_password() : m.conceal_password()}
 						onclick={() => void app.toggleReveal()}

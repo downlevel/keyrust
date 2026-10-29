@@ -2,7 +2,14 @@
 	import type { StrengthEstimate } from "$lib/api";
 	import { m } from "$lib/paraglide/messages.js";
 
-	let { estimate }: { estimate: StrengthEstimate } = $props();
+	let {
+		estimate,
+		id,
+	}: {
+		estimate: StrengthEstimate;
+		/** For `aria-describedby` on the password field it rates. */
+		id?: string;
+	} = $props();
 
 	const labels = [
 		m.strength_none,
@@ -37,5 +44,7 @@
 			></span>
 		{/each}
 	</div>
-	<span class="min-w-28 text-right text-xs font-medium {text[estimate.level]}">{caption}</span>
+	<span {id} class="min-w-28 text-right text-xs font-medium {text[estimate.level]}"
+		>{caption}</span
+	>
 </div>
