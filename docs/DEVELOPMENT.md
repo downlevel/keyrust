@@ -105,11 +105,11 @@ of the fixtures from a pre-filled recent-files list in a temporary `XDG_CONFIG_H
 hook. On a Linux machine with the Tauri prerequisites:
 
 ```sh
-sudo apt-get install webkit2gtk-driver xvfb
+sudo apt-get install webkit2gtk-driver xvfb dbus
 cargo install tauri-driver --locked --version 2.1.0
 (cd crates/app/ui && pnpm install && pnpm tauri build --debug --no-bundle)
 pnpm --dir crates/app/e2e install
-xvfb-run -a pnpm --dir crates/app/e2e test     # KEYRUST_E2E_DIR chooses the work folder
+xvfb-run -a dbus-run-session -- pnpm --dir crates/app/e2e test    # KEYRUST_E2E_DIR chooses the work folder
 ```
 
 ### Logs

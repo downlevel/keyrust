@@ -84,7 +84,9 @@ describe("Keyrust smoke test", () => {
 						'section[aria-labelledby="recent-heading"] li button',
 					).length,
 			);
+		// The first start of WebKitGTK in CI can be slow.
 		await browser.waitUntil(async () => (await count()) > 0, {
+			timeout: 60_000,
 			timeoutMsg: `no recent files: is the settings file read from ${p.settings}?`,
 		});
 		expect(await count()).toBe(2);

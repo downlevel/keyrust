@@ -167,7 +167,9 @@ async function tabThrough(page: Page, max = 60, minStops = 3) {
 		await page.evaluate(() => (window as unknown as { __snapshot: () => void }).__snapshot());
 		await page.keyboard.press("Tab");
 		// Measure the end state of any transition the focus started.
-		await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+		await page.evaluate(() =>
+			Promise.allSettled(document.getAnimations().map((a) => a.finished)),
+		);
 		const stop = (await page.evaluate(() =>
 			(window as unknown as { __stop: () => unknown }).__stop(),
 		)) as Stop | null;

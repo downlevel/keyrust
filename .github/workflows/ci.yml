@@ -190,7 +190,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             libayatana-appindicator3-dev libxdo-dev libssl-dev \
-            webkit2gtk-driver xvfb
+            webkit2gtk-driver xvfb dbus
           sudo apt-get install -y --no-install-recommends keepassxc
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -219,7 +219,10 @@ jobs:
           export KEYRUST_E2E_DIR="$RUNNER_TEMP/keyrust-e2e" KEYRUST_LOG=info
           pnpm --dir crates/app/e2e install --frozen-lockfile
           pnpm --dir crates/app/e2e check
-          xvfb-run -a pnpm --dir crates/app/e2e test 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          # A session bus, as on a desktop: without one GTK waits ~25 s for the
+          # desktop portal before the window appears.
+          xvfb-run -a dbus-run-session -- pnpm --dir crates/app/e2e test 2>&1 |
+            tee "$RUNNER_TEMP/e2e.log"
       # The file the real app saved is still a database KeePassXC reads, with
       # the new title; the KDBX 3.1 copy was opened but never written.
       - name: KeePassXC reads the saved file
