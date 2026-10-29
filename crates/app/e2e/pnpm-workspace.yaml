@@ -1,0 +1,6 @@
+# Build scripts: esbuild verifies its binary; the Edge and Firefox drivers
+# would download browsers this test never uses (it drives WebKitGTK).
+allowBuilds:
+  esbuild: true
+  edgedriver: false
+  geckodriver: false

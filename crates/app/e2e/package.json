@@ -1,0 +1,23 @@
+{
+  "name": "keyrust-e2e",
+  "version": "0.0.1",
+  "description": "End-to-end smoke test of the real Keyrust app (Tauri + WebKitGTK) through tauri-driver; Linux CI only",
+  "type": "module",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "test": "wdio run ./wdio.conf.ts",
+    "check": "tsc --noEmit"
+  },
+  "packageManager": "pnpm@12.15.0",
+  "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "@types/node": "24.19.2",
+    "@wdio/cli": "9.32.0",
+    "@wdio/globals": "9.31.3",
+    "@wdio/local-runner": "9.32.0",
+    "@wdio/mocha-framework": "9.32.0",
+    "@wdio/spec-reporter": "9.32.0",
+    "typescript": "6.0.3"
+  }
+}
