@@ -38,3 +38,8 @@
   cartelle) più il job `reproducibility` che confronta; `fuzz/Cargo.lock` era già disallineato da 4a (mancava
   `roxmltree`), riallineato alla stessa versione del lockfile principale; la verifica di partial secrets fa fallire
   `verify` invece di produrre installer non firmati in silenzio.
+
+## Ispezione 1 — Codex codex-cli 0.165.0 (gpt-6.1-sol, effort high; sessione nuova 01a1881c-7abb-7302-9b16-98696776fe42) — REVISE (1 medium) — base `612bc2d`, snapshot `ad07ef9`
+- Un primo avvio (`/tmp/claude-0/-opt-apps-password-manager/396c1774-6943-4819-a44e-4e13330ae930/scratchpad/claudex/i1`) con `--host codex` errato è stato interrotto dall'host prima del risultato (record rimasto `running`); non conta come ispezione.
+- Result: `/tmp/claude-0/-opt-apps-password-manager/396c1774-6943-4819-a44e-4e13330ae930/scratchpad/claudex/i1b/claudex-jqwl7p0u/result.json`
+- M4B-I01 (medium) `SHA256SUMS` scritto nella cartella espansa da `sha256sum -- *`: una corsa può includerlo con l'hash del file vuoto e far fallire `sha256sum -c` → ACCETTATO: manifesto scritto in `$RUNNER_TEMP` e spostato in `dist` dopo; actionlint e simulazione dello step verdi.

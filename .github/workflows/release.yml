@@ -370,7 +370,10 @@ jobs:
           mkdir dist
           find artifacts -type f -exec mv -t dist {} +
           scripts/release/check-assets.sh "$VERSION" dist
-          (cd dist && sha256sum -- * | LC_ALL=C sort -k 2 > SHA256SUMS && cat SHA256SUMS && sha256sum -c SHA256SUMS)
+          # Written outside dist first: the glob must not see a half-written SHA256SUMS.
+          (cd dist && sha256sum -- * | LC_ALL=C sort -k 2 > "$RUNNER_TEMP/SHA256SUMS")
+          mv "$RUNNER_TEMP/SHA256SUMS" dist/SHA256SUMS
+          (cd dist && cat SHA256SUMS && sha256sum -c SHA256SUMS)
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: needs.verify.outputs.cosign == 'true'
         with:
