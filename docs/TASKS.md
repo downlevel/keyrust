@@ -80,7 +80,7 @@
 - [x] Decidere ed eventualmente configurare la firma codice Windows (Authenticode) e macOS (Developer ID + notarizzazione):
   opzionale, attivata dai secret; nessun certificato per ora (4b, [RELEASING.md](RELEASING.md#code-signing-optional))
 - [x] Build riproducibili "best effort" (`SOURCE_DATE_EPOCH`, lockfile, toolchain fissata) e documentazione per verificarle (4b)
-- [ ] Release `v0.1.0` *(task utente: tag `v0.1.0` su `main` dopo il merge, poi pubblicare la bozza — [RELEASING.md](RELEASING.md#making-a-release))*
+- [x] Release [`v0.1.0`](https://github.com/downlevel/keyrust/releases/tag/v0.1.0) pubblicata il 2026-10-30: firma cosign e checksum di tutti gli installer verificati, build Linux riproducibile
 
 ## Dopo l'MVP (V2)
 - [ ] Keyfile
