@@ -33,6 +33,10 @@ test.describe("unlock and create", () => {
 		await page.getByLabel("Master password", { exact: true }).fill("correct horse battery");
 		await page.getByLabel("Confirm master password").fill("correct horse");
 		await page.getByRole("button", { name: "Advanced encryption settings" }).click();
+		// The benchmark started on mount keeps its button disabled (half opacity) until it
+		// ends; auditing while it fades back in measures a transitional colour.
+		await expect(page.getByText(/^Unlocking takes about 1 second/)).toBeVisible();
+		await expect(page.getByRole("button", { name: "Benchmark (1 s)" })).toBeEnabled();
 		await audit(page, info, "create-advanced-mismatch");
 	});
 });
